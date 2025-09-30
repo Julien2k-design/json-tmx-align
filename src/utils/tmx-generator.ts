@@ -50,9 +50,20 @@ export function generateTMX(
 }
 
 function generateTUID(tu: TranslationUnit): string {
-  // Generate a unique ID for the translation unit
+  // Generate a unique ID for the translation unit (Unicode-safe)
   const combined = `${tu.keyPath}_${tu.sourceText}`;
-  return btoa(combined).replace(/[+=\/]/g, '').substring(0, 16);
+  const base64 = utf8ToBase64(combined);
+  return base64.replace(/[+=\/]/g, '').substring(0, 16);
+}
+
+function utf8ToBase64(str: string): string {
+  // Use TextEncoder to handle Unicode characters safely
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary);
 }
 
 export function downloadTMX(tmxContent: string, filename: string = 'translation_memory.tmx'): void {
