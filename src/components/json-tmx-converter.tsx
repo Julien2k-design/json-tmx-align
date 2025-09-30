@@ -1,35 +1,18 @@
 import React, { useState, useCallback } from 'react';
 import { FileUpload } from './file-upload';
-import { LanguageSelector } from './language-selector';
 import { ProcessingStatus } from './processing-status';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Download, Languages, RefreshCw } from 'lucide-react';
-import { JsonFile, AlignmentResult, ProcessingStatus as ProcessingStatusType } from '@/types/json-tmx';
-import { parseJsonFiles } from '@/utils/json-parser';
+import { Download, Languages, RefreshCw, Building2 } from 'lucide-react';
+import { JsonFile, TMXExport, ProcessingStatus as ProcessingStatusType } from '@/types/json-tmx';
+import { findLanguagePairs, parseJsonFiles } from '@/utils/json-parser';
 import { generateTMX, downloadTMX } from '@/utils/tmx-generator';
 import { useToast } from '@/hooks/use-toast';
 
-const SUPPORTED_LANGUAGES = [
-  { code: 'en', name: 'English' },
-  { code: 'es', name: 'Spanish' },
-  { code: 'fr', name: 'French' },
-  { code: 'de', name: 'German' },
-  { code: 'it', name: 'Italian' },
-  { code: 'pt', name: 'Portuguese' },
-  { code: 'ja', name: 'Japanese' },
-  { code: 'ko', name: 'Korean' },
-  { code: 'zh', name: 'Chinese' },
-  { code: 'ru', name: 'Russian' },
-  { code: 'ar', name: 'Arabic' },
-];
-
 export function JsonTmxConverter() {
-  const [sourceFiles, setSourceFiles] = useState<JsonFile[]>([]);
-  const [targetFiles, setTargetFiles] = useState<JsonFile[]>([]);
-  const [sourceLanguage, setSourceLanguage] = useState('en');
-  const [targetLanguage, setTargetLanguage] = useState('es');
-  const [alignmentResult, setAlignmentResult] = useState<AlignmentResult | null>(null);
+  const [allFiles, setAllFiles] = useState<JsonFile[]>([]);
+  const [tmxExports, setTmxExports] = useState<TMXExport[]>([]);
+  const [detectedLanguages, setDetectedLanguages] = useState<string[]>([]);
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatusType>({
     isProcessing: false,
     progress: 0,
@@ -37,11 +20,25 @@ export function JsonTmxConverter() {
   
   const { toast } = useToast();
 
+  const handleFilesChange = useCallback((files: JsonFile[]) => {
+    setAllFiles(files);
+    
+    // Detect languages from uploaded files
+    const languages = Array.from(new Set(
+      files.map(file => {
+        const langMatch = file.name.match(/[._-]([a-z]{2}(?:-[A-Z]{2})?)\./i);
+        return langMatch ? langMatch[1].toLowerCase() : null;
+      }).filter(Boolean)
+    )) as string[];
+    
+    setDetectedLanguages(languages);
+  }, []);
+
   const processFiles = useCallback(async () => {
-    if (sourceFiles.length === 0 || targetFiles.length === 0) {
+    if (allFiles.length === 0) {
       toast({
         title: "Missing Files",
-        description: "Please upload both source and target JSON files.",
+        description: "Please upload JSON files to process.",
         variant: "destructive",
       });
       return;
@@ -50,39 +47,46 @@ export function JsonTmxConverter() {
     setProcessingStatus({
       isProcessing: true,
       progress: 0,
-      message: "Starting alignment process...",
+      message: "Detecting language pairs...",
     });
 
-    // Simulate processing with progress updates
-    const totalFiles = sourceFiles.length;
-    let processedFiles = 0;
-
     try {
-      for (let i = 0; i < sourceFiles.length; i++) {
+      const languagePairs = findLanguagePairs(allFiles);
+      
+      if (languagePairs.length === 0) {
+        toast({
+          title: "No Language Pairs Found",
+          description: "Could not detect English source files and target language files.",
+          variant: "destructive",
+        });
+        setProcessingStatus({ isProcessing: false, progress: 0 });
+        return;
+      }
+
+      const exports: TMXExport[] = [];
+      const totalPairs = languagePairs.length;
+
+      for (let i = 0; i < languagePairs.length; i++) {
+        const pair = languagePairs[i];
+        
         setProcessingStatus({
           isProcessing: true,
-          progress: (i / totalFiles) * 100,
-          currentFile: sourceFiles[i].name,
-          message: `Processing ${sourceFiles[i].name}...`,
+          progress: (i / totalPairs) * 90,
+          message: `Processing ${pair.sourceLanguage} → ${pair.targetLanguage}...`,
+        });
+        
+        const result = parseJsonFiles(pair.sourceFiles, pair.targetFiles);
+        
+        exports.push({
+          languagePair: pair,
+          ...result
         });
         
         // Simulate processing delay
-        await new Promise(resolve => setTimeout(resolve, 200));
-        processedFiles++;
+        await new Promise(resolve => setTimeout(resolve, 300));
       }
 
-      setProcessingStatus({
-        isProcessing: true,
-        progress: 95,
-        message: "Generating alignment results...",
-      });
-
-      const result = parseJsonFiles(sourceFiles, targetFiles);
-      
-      setAlignmentResult({
-        ...result,
-        processedFiles,
-      });
+      setTmxExports(exports);
 
       setProcessingStatus({
         isProcessing: false,
@@ -90,9 +94,11 @@ export function JsonTmxConverter() {
         message: "Processing complete!",
       });
 
+      const totalUnits = exports.reduce((sum, exp) => sum + exp.translationUnits.length, 0);
+      
       toast({
         title: "Processing Complete",
-        description: `Generated ${result.translationUnits.length} translation units.`,
+        description: `Generated ${exports.length} TMX files with ${totalUnits} translation units total.`,
       });
 
     } catch (error) {
@@ -107,10 +113,10 @@ export function JsonTmxConverter() {
         variant: "destructive",
       });
     }
-  }, [sourceFiles, targetFiles, toast]);
+  }, [allFiles, toast]);
 
-  const downloadTmxFile = useCallback(() => {
-    if (!alignmentResult || alignmentResult.translationUnits.length === 0) {
+  const downloadTmxFile = useCallback((tmxExport: TMXExport) => {
+    if (tmxExport.translationUnits.length === 0) {
       toast({
         title: "No Data",
         description: "No translation units available for export.",
@@ -120,24 +126,30 @@ export function JsonTmxConverter() {
     }
 
     const tmxContent = generateTMX(
-      alignmentResult.translationUnits,
-      sourceLanguage,
-      targetLanguage
+      tmxExport.translationUnits,
+      tmxExport.languagePair.sourceLanguage,
+      tmxExport.languagePair.targetLanguage
     );
 
-    const filename = `translation_memory_${sourceLanguage}_${targetLanguage}.tmx`;
+    const filename = `translation_memory_${tmxExport.languagePair.sourceLanguage}_${tmxExport.languagePair.targetLanguage}.tmx`;
     downloadTMX(tmxContent, filename);
 
     toast({
       title: "TMX Downloaded",
-      description: `Downloaded ${filename} with ${alignmentResult.translationUnits.length} translation units.`,
+      description: `Downloaded ${filename} with ${tmxExport.translationUnits.length} translation units.`,
     });
-  }, [alignmentResult, sourceLanguage, targetLanguage, toast]);
+  }, [toast]);
+
+  const downloadAllTmxFiles = useCallback(() => {
+    tmxExports.forEach(tmxExport => {
+      setTimeout(() => downloadTmxFile(tmxExport), 100);
+    });
+  }, [tmxExports, downloadTmxFile]);
 
   const reset = useCallback(() => {
-    setSourceFiles([]);
-    setTargetFiles([]);
-    setAlignmentResult(null);
+    setAllFiles([]);
+    setTmxExports([]);
+    setDetectedLanguages([]);
     setProcessingStatus({
       isProcessing: false,
       progress: 0,
@@ -148,58 +160,55 @@ export function JsonTmxConverter() {
     <div className="max-w-6xl mx-auto space-y-8">
       {/* Header */}
       <div className="text-center space-y-4">
-        <div className="flex items-center justify-center space-x-2 mb-4">
+        <div className="flex items-center justify-center space-x-3 mb-4">
+          <div className="flex items-center space-x-2 px-4 py-2 bg-gradient-icon rounded-lg">
+            <Building2 className="w-6 h-6 text-white" />
+            <span className="text-white font-semibold">ICON plc</span>
+          </div>
           <Languages className="w-8 h-8 text-primary" />
-          <h1 className="text-4xl font-bold bg-gradient-primary bg-clip-text text-transparent">
-            JSON to TMX Converter
-          </h1>
         </div>
+        <h1 className="text-4xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          JSON to TMX Converter
+        </h1>
         <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-          Transform your JSON localization files into Translation Memory eXchange (TMX) format 
+          Automatically detect language pairs and transform JSON localization files into Translation Memory eXchange (TMX) format 
           for seamless integration with CAT tools like SDL Trados, MemoQ, and Memsource.
         </p>
       </div>
 
-      {/* Language Configuration */}
-      <Card className="p-6 bg-gradient-card shadow-card">
-        <h2 className="text-xl font-semibold mb-4 text-foreground">Language Configuration</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <LanguageSelector
-            label="Source Language"
-            value={sourceLanguage}
-            onValueChange={setSourceLanguage}
-            languages={SUPPORTED_LANGUAGES}
-          />
-          <LanguageSelector
-            label="Target Language"
-            value={targetLanguage}
-            onValueChange={setTargetLanguage}
-            languages={SUPPORTED_LANGUAGES.filter(lang => lang.code !== sourceLanguage)}
-          />
-        </div>
-      </Card>
-
       {/* File Upload */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+      <Card className="p-6 bg-gradient-card shadow-card">
+        <h2 className="text-xl font-semibold mb-4 text-foreground">Upload JSON Files</h2>
+        <p className="text-muted-foreground mb-4">
+          Upload all your JSON files at once. The tool will automatically detect languages from filenames (e.g., menu_en-GB.json, menu_es-ES.json) 
+          and match source files with their target language counterparts.
+        </p>
         <FileUpload
-          title="Source Files"
-          description="Upload your source language JSON files (e.g., English)"
-          onFilesChange={setSourceFiles}
-          files={sourceFiles}
+          title="All JSON Files"
+          description="Upload all source and target JSON files together"
+          onFilesChange={handleFilesChange}
+          files={allFiles}
         />
-        <FileUpload
-          title="Target Files"
-          description="Upload your target language JSON files (e.g., Spanish, French, etc.)"
-          onFilesChange={setTargetFiles}
-          files={targetFiles}
-        />
-      </div>
+        
+        {detectedLanguages.length > 0 && (
+          <div className="mt-4 p-3 bg-secondary rounded-lg">
+            <h3 className="font-medium text-foreground mb-2">Detected Languages:</h3>
+            <div className="flex flex-wrap gap-2">
+              {detectedLanguages.map(lang => (
+                <span key={lang} className="px-3 py-1 bg-primary text-primary-foreground rounded-full text-sm">
+                  {lang}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+      </Card>
 
       {/* Processing Actions */}
       <div className="flex justify-center space-x-4">
         <Button
           onClick={processFiles}
-          disabled={sourceFiles.length === 0 || targetFiles.length === 0 || processingStatus.isProcessing}
+          disabled={allFiles.length === 0 || processingStatus.isProcessing}
           variant="hero"
           size="lg"
         >
@@ -211,20 +220,19 @@ export function JsonTmxConverter() {
           ) : (
             <>
               <Languages className="w-4 h-4" />
-              Align & Process
+              Auto-Detect & Process
             </>
           )}
         </Button>
         
-        {alignmentResult && (
+        {tmxExports.length > 0 && (
           <Button
-            onClick={downloadTmxFile}
-            disabled={!alignmentResult || alignmentResult.translationUnits.length === 0}
+            onClick={downloadAllTmxFiles}
             variant="success"
             size="lg"
           >
             <Download className="w-4 h-4" />
-            Download TMX
+            Download All TMX
           </Button>
         )}
         
@@ -238,11 +246,43 @@ export function JsonTmxConverter() {
         </Button>
       </div>
 
+      {/* TMX Export Results */}
+      {tmxExports.length > 0 && (
+        <Card className="p-6 bg-gradient-card shadow-card">
+          <h2 className="text-xl font-semibold mb-4 text-foreground">Generated TMX Files</h2>
+          <div className="space-y-4">
+            {tmxExports.map((tmxExport, index) => (
+              <div key={index} className="flex items-center justify-between p-4 bg-secondary rounded-lg">
+                <div>
+                  <h3 className="font-medium text-foreground">
+                    {tmxExport.languagePair.sourceLanguage.toUpperCase()} → {tmxExport.languagePair.targetLanguage.toUpperCase()}
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    {tmxExport.translationUnits.length} translation units
+                    {tmxExport.errors.length > 0 && (
+                      <span className="text-destructive ml-2">• {tmxExport.errors.length} errors</span>
+                    )}
+                  </p>
+                </div>
+                <Button
+                  onClick={() => downloadTmxFile(tmxExport)}
+                  variant="outline"
+                  size="sm"
+                >
+                  <Download className="w-4 h-4" />
+                  Download
+                </Button>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       {/* Processing Status */}
       <ProcessingStatus
         status={processingStatus}
-        translationUnits={alignmentResult?.translationUnits.length || 0}
-        errors={alignmentResult?.errors || []}
+        translationUnits={tmxExports.reduce((sum, exp) => sum + exp.translationUnits.length, 0)}
+        errors={tmxExports.flatMap(exp => exp.errors)}
       />
     </div>
   );

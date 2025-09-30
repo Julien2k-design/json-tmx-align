@@ -1,4 +1,66 @@
-import { JsonFile, TranslationUnit } from '@/types/json-tmx';
+import { JsonFile, TranslationUnit, LanguagePair } from '@/types/json-tmx';
+
+export function detectLanguageFromFilename(filename: string): string | null {
+  // Match patterns like: file_en-GB.json, file.en-US.json, file-es-ES.json
+  const langMatch = filename.match(/[._-]([a-z]{2}(?:-[A-Z]{2})?)\.(json|js)$/i);
+  return langMatch ? langMatch[1].toLowerCase() : null;
+}
+
+export function getBaseName(fileName: string): string {
+  // Remove file extension and language codes
+  return fileName
+    .replace(/\.(json|js)$/i, '')
+    .replace(/[._-][a-z]{2}(?:-[A-Z]{2})?$/i, '');
+}
+
+export function groupFilesByLanguage(files: JsonFile[]): Map<string, JsonFile[]> {
+  const languageGroups = new Map<string, JsonFile[]>();
+  
+  files.forEach(file => {
+    const language = detectLanguageFromFilename(file.name);
+    if (language) {
+      if (!languageGroups.has(language)) {
+        languageGroups.set(language, []);
+      }
+      languageGroups.get(language)!.push(file);
+    }
+  });
+  
+  return languageGroups;
+}
+
+export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
+  const languageGroups = groupFilesByLanguage(files);
+  const pairs: LanguagePair[] = [];
+  
+  // Find English source languages (en, en-gb, en-us)
+  const englishLangs = Array.from(languageGroups.keys()).filter(lang => 
+    lang.startsWith('en')
+  );
+  
+  // Find target languages (non-English)
+  const targetLangs = Array.from(languageGroups.keys()).filter(lang => 
+    !lang.startsWith('en')
+  );
+  
+  englishLangs.forEach(sourceLang => {
+    targetLangs.forEach(targetLang => {
+      const sourceFiles = languageGroups.get(sourceLang) || [];
+      const targetFiles = languageGroups.get(targetLang) || [];
+      
+      if (sourceFiles.length > 0 && targetFiles.length > 0) {
+        pairs.push({
+          sourceLanguage: sourceLang,
+          targetLanguage: targetLang,
+          sourceFiles,
+          targetFiles
+        });
+      }
+    });
+  });
+  
+  return pairs;
+}
 
 export function parseJsonFiles(sourceFiles: JsonFile[], targetFiles: JsonFile[]): {
   translationUnits: TranslationUnit[];
@@ -9,7 +71,7 @@ export function parseJsonFiles(sourceFiles: JsonFile[], targetFiles: JsonFile[])
   const errors: string[] = [];
   const missingKeys: string[] = [];
 
-  // Create a map of target files by name for quick lookup
+  // Create a map of target files by base name for quick lookup
   const targetFileMap = new Map<string, JsonFile>();
   targetFiles.forEach(file => {
     const baseName = getBaseName(file.name);
@@ -46,12 +108,6 @@ export function parseJsonFiles(sourceFiles: JsonFile[], targetFiles: JsonFile[])
   return { translationUnits, errors, missingKeys };
 }
 
-function getBaseName(fileName: string): string {
-  // Remove file extension and language codes (e.g., "menu.en.json" -> "menu", "menu_es.json" -> "menu")
-  return fileName
-    .replace(/\.(json|js)$/i, '')
-    .replace(/[._-](en|es|fr|de|it|pt|ja|ko|zh|ru|ar)$/i, '');
-}
 
 function extractTranslationUnits(
   source: any,

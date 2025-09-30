@@ -24,3 +24,17 @@ export interface ProcessingStatus {
   currentFile?: string;
   message?: string;
 }
+
+export interface LanguagePair {
+  sourceLanguage: string;
+  targetLanguage: string;
+  sourceFiles: JsonFile[];
+  targetFiles: JsonFile[];
+}
+
+export interface TMXExport {
+  languagePair: LanguagePair;
+  translationUnits: TranslationUnit[];
+  errors: string[];
+  missingKeys: string[];
+}
