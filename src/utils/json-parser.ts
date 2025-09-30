@@ -11,7 +11,16 @@ export function detectLanguageFromJson(jsonContent: any): string | null {
 export function detectLanguageFromFilename(filename: string): string | null {
   // Match patterns like: file_en-GB.json, file.en-US.json, file-es-ES.json
   const langMatch = filename.match(/[._-]([a-z]{2}(?:-[A-Z]{2})?)\.(json|js)$/i);
-  return langMatch ? langMatch[1].toLowerCase() : null;
+  if (langMatch) {
+    // Normalize case: en-gb -> en-GB
+    const lang = langMatch[1].toLowerCase();
+    const parts = lang.split('-');
+    if (parts.length === 2) {
+      return `${parts[0]}-${parts[1].toUpperCase()}`;
+    }
+    return parts[0];
+  }
+  return null;
 }
 
 export function flattenJSON(obj: any, parentKey: string = ''): Record<string, string> {
@@ -47,7 +56,8 @@ export function groupFilesByLanguage(files: JsonFile[]): Map<string, JsonFile[]>
   const languageGroups = new Map<string, JsonFile[]>();
   
   files.forEach(file => {
-    const language = detectLanguageFromJson(file.content);
+    // Try filename detection first (more reliable), then JSON content
+    const language = detectLanguageFromFilename(file.name) || detectLanguageFromJson(file.content);
     if (language) {
       if (!languageGroups.has(language)) {
         languageGroups.set(language, []);
@@ -79,7 +89,8 @@ export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
     const targetFiles: JsonFile[] = [];
     
     group.forEach(file => {
-      const langCode = detectLanguageFromJson(file.content);
+      // Try filename detection first, then JSON content
+      const langCode = detectLanguageFromFilename(file.name) || detectLanguageFromJson(file.content);
       if (langCode && sourceLangCodes.includes(langCode)) {
         sourceFile = file;
       } else if (langCode) {
@@ -89,8 +100,8 @@ export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
     
     if (sourceFile && targetFiles.length > 0) {
       targetFiles.forEach(targetFile => {
-        const targetLang = detectLanguageFromJson(targetFile.content);
-        const sourceLang = detectLanguageFromJson(sourceFile!.content);
+        const targetLang = detectLanguageFromFilename(targetFile.name) || detectLanguageFromJson(targetFile.content);
+        const sourceLang = detectLanguageFromFilename(sourceFile!.name) || detectLanguageFromJson(sourceFile!.content);
         
         if (sourceLang && targetLang) {
           pairs.push({
