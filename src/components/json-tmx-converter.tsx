@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Download, Languages, RefreshCw, Building2 } from 'lucide-react';
 import { JsonFile, TMXExport, ProcessingStatus as ProcessingStatusType } from '@/types/json-tmx';
-import { findLanguagePairs, parseJsonFiles } from '@/utils/json-parser';
+import { findLanguagePairs, parseJsonFiles, detectLanguageForFile } from '@/utils/json-parser';
 import { generateTMX, downloadTMX } from '@/utils/tmx-generator';
 import { useToast } from '@/hooks/use-toast';
 
@@ -23,15 +23,16 @@ export function JsonTmxConverter() {
   const handleFilesChange = useCallback((files: JsonFile[]) => {
     setAllFiles(files);
     
-    // Detect languages from uploaded files
+    // Detect languages from uploaded files using consistent detection logic
     const languages = Array.from(new Set(
       files.map(file => {
-        const langMatch = file.name.match(/[._-]([a-z]{2}(?:-[A-Z]{2})?)\./i);
-        return langMatch ? langMatch[1].toLowerCase() : null;
+        const { lang } = detectLanguageForFile(file);
+        return lang;
       }).filter(Boolean)
     )) as string[];
     
     setDetectedLanguages(languages);
+    console.debug('[handleFilesChange] Detected languages:', languages);
   }, []);
 
   const processFiles = useCallback(async () => {
