@@ -23,25 +23,57 @@ export function generateTMX(
 </tmx>`;
 
   const translationUnitElements = translationUnits.map(tu => {
-    // Escape XML special characters and encode non-breaking spaces
+    // Decode HTML entities first, then escape XML special characters
+    const decodeHtmlEntities = (text: string) => {
+      const entityMap: { [key: string]: string } = {
+        'agrave': 'à', 'aacute': 'á', 'acirc': 'â', 'atilde': 'ã', 'auml': 'ä', 'aring': 'å',
+        'Agrave': 'À', 'Aacute': 'Á', 'Acirc': 'Â', 'Atilde': 'Ã', 'Auml': 'Ä', 'Aring': 'Å',
+        'ccedil': 'ç', 'Ccedil': 'Ç',
+        'egrave': 'è', 'eacute': 'é', 'ecirc': 'ê', 'euml': 'ë',
+        'Egrave': 'È', 'Eacute': 'É', 'Ecirc': 'Ê', 'Euml': 'Ë',
+        'igrave': 'ì', 'iacute': 'í', 'icirc': 'î', 'iuml': 'ï',
+        'Igrave': 'Ì', 'Iacute': 'Í', 'Icirc': 'Î', 'Iuml': 'Ï',
+        'ograve': 'ò', 'oacute': 'ó', 'ocirc': 'ô', 'otilde': 'õ', 'ouml': 'ö',
+        'Ograve': 'Ò', 'Oacute': 'Ó', 'Ocirc': 'Ô', 'Otilde': 'Õ', 'Ouml': 'Ö',
+        'ugrave': 'ù', 'uacute': 'ú', 'ucirc': 'û', 'uuml': 'ü',
+        'Ugrave': 'Ù', 'Uacute': 'Ú', 'Ucirc': 'Û', 'Uuml': 'Ü',
+        'yacute': 'ý', 'yuml': 'ÿ', 'Yacute': 'Ý',
+        'nbsp': '\u00A0', 'iexcl': '¡', 'iquest': '¿',
+        'laquo': '«', 'raquo': '»', 'quot': '"', 'apos': "'",
+        'amp': '&', 'lt': '<', 'gt': '>',
+        'hellip': '…', 'ndash': '–', 'mdash': '—',
+        'copy': '©', 'reg': '®', 'trade': '™',
+        'euro': '€', 'pound': '£', 'yen': '¥', 'cent': '¢'
+      };
+      
+      return text
+        // Decode named entities
+        .replace(/&([a-zA-Z]+);/g, (match, entity) => entityMap[entity] || match)
+        // Decode numeric entities (decimal)
+        .replace(/&#(\d+);/g, (match, dec) => String.fromCodePoint(parseInt(dec, 10)))
+        // Decode numeric entities (hexadecimal)
+        .replace(/&#x([0-9A-Fa-f]+);/g, (match, hex) => String.fromCodePoint(parseInt(hex, 16)));
+    };
+    
     const escapeXml = (text: string) => {
       return text
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;')
-        .replace(/\u00A0/g, '&nbsp;'); // Non-breaking space
+        .replace(/'/g, '&apos;');
     };
+
+    const processText = (text: string) => escapeXml(decodeHtmlEntities(text));
 
     return `
     <tu tuid="${generateTUID(tu)}">
-      <note>${escapeXml(tu.keyPath)}${tu.filePath ? ` (${tu.filePath})` : ''}</note>
+      <note>${processText(tu.keyPath)}${tu.filePath ? ` (${tu.filePath})` : ''}</note>
       <tuv xml:lang="${sourceLanguage}">
-        <seg>${escapeXml(tu.sourceText)}</seg>
+        <seg>${processText(tu.sourceText)}</seg>
       </tuv>
       <tuv xml:lang="${targetLanguage}">
-        <seg>${escapeXml(tu.targetText)}</seg>
+        <seg>${processText(tu.targetText)}</seg>
       </tuv>
     </tu>`;
   }).join('');
