@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Download, Languages, RefreshCw, Building2 } from 'lucide-react';
 import { JsonFile, TMXExport, ProcessingStatus as ProcessingStatusType } from '@/types/json-tmx';
-import { findLanguagePairs, parseJsonFiles, detectLanguageForFile } from '@/utils/json-parser';
+import { findLanguagePairs, parseJsonFiles, detectLanguageForFile, getBaseName } from '@/utils/json-parser';
 import { generateTMX, downloadTMX } from '@/utils/tmx-generator';
 import { useToast } from '@/hooks/use-toast';
 

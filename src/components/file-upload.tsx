@@ -29,7 +29,7 @@ export function FileUpload({ title, description, onFilesChange, files, accept = 
           newFiles.push({
             name: file.name,
             content,
-            path: file.name,
+            path: (file as any).webkitRelativePath || file.name,
           });
         } catch (error) {
           console.error(`Error parsing ${file.name}:`, error);
@@ -91,6 +91,7 @@ export function FileUpload({ title, description, onFilesChange, files, accept = 
           onChange={handleFileInput}
           className="hidden"
           id={`file-input-${title.replace(/\s+/g, '-').toLowerCase()}`}
+          {...({ webkitdirectory: true, directory: true } as any)}
         />
         <Button
           variant="outline"

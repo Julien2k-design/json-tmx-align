@@ -8,52 +8,80 @@ export function detectLanguageFromJson(jsonContent: any): string | null {
   return null;
 }
 
-export function detectLanguageForFile(file: JsonFile): { lang: string | null, origin: 'json' | 'filename' | 'both' | null } {
+export function detectLanguageForFile(file: JsonFile): { lang: string | null; origin: 'path' | 'json' | 'filename' | 'both' | null } {
+  const fromPath = file.path ? detectLanguageFromPath(file.path) : null;
   const fromFilename = detectLanguageFromFilename(file.name);
   const fromJson = detectLanguageFromJson(file.content);
-  
-  console.debug(`[detectLanguageForFile] ${file.name}:`, { fromFilename, fromJson });
-  
-  // If both methods detect the same language
-  if (fromFilename && fromJson && fromFilename === fromJson) {
-    return { lang: fromFilename, origin: 'both' };
+
+  const candidates: Array<{ lang: string; origin: 'path' | 'filename' | 'json' }> = [];
+  if (fromPath) candidates.push({ lang: fromPath, origin: 'path' });
+  if (fromFilename) candidates.push({ lang: fromFilename, origin: 'filename' });
+  if (fromJson) candidates.push({ lang: fromJson, origin: 'json' });
+
+  // Specificity: with region (xx-YY) = 2, plain (xx) = 1
+  const specificity = (code: string) => (/^[a-z]{2}-[A-Z]{2}$/.test(code) ? 2 : /^[a-z]{2}$/.test(code) ? 1 : 0);
+
+  // Choose by highest specificity, then origin priority: path > filename > json
+  let best: { lang: string; origin: 'path' | 'filename' | 'json' } | null = null;
+  for (const c of candidates) {
+    if (!best) {
+      best = c;
+      continue;
+    }
+    const sBest = specificity(best.lang);
+    const sC = specificity(c.lang);
+    if (sC > sBest) {
+      best = c;
+      continue;
+    }
+    if (sC === sBest) {
+      const priority: Record<'path' | 'filename' | 'json', number> = { path: 3, filename: 2, json: 1 };
+      if (priority[c.origin] > priority[best.origin]) {
+        best = c;
+      }
+    }
   }
-  
-  // Prefer the detection that includes a region (xx-YY format)
-  const hasRegionFilename = fromFilename && /^[a-z]{2}-[A-Z]{2}$/.test(fromFilename);
-  const hasRegionJson = fromJson && /^[a-z]{2}-[A-Z]{2}$/.test(fromJson);
-  
-  if (hasRegionFilename && !hasRegionJson) {
-    return { lang: fromFilename, origin: 'filename' };
-  }
-  if (hasRegionJson && !hasRegionFilename) {
-    return { lang: fromJson, origin: 'json' };
-  }
-  
-  // If both have regions or both don't have regions, prefer filename
-  if (fromFilename) {
-    return { lang: fromFilename, origin: 'filename' };
-  }
-  if (fromJson) {
-    return { lang: fromJson, origin: 'json' };
-  }
-  
-  return { lang: null, origin: null };
+
+  const origin: 'path' | 'filename' | 'json' | 'both' | null = best ? best.origin : null;
+  console.debug(`[detectLanguageForFile] ${file.path || file.name}:`, { fromPath, fromFilename, fromJson, chosen: best?.lang, origin });
+
+  return { lang: best?.lang || null, origin };
 }
 
 export function detectLanguageFromFilename(filename: string): string | null {
-  // Match patterns like: file_en-GB.json, file.en-US.json, file-es-ES.json
-  const langMatch = filename.match(/[._-]([a-z]{2}(?:-[A-Z]{2})?)\.(json|js)$/i);
-  if (langMatch) {
-    // Normalize case: en-gb -> en-GB
-    const lang = langMatch[1].toLowerCase();
-    const parts = lang.split('-');
-    if (parts.length === 2) {
-      return `${parts[0]}-${parts[1].toUpperCase()}`;
-    }
-    return parts[0];
+  // Try suffix near the extension: base_en-GB.json | base.en_US.json | base-fr.json
+  const suffixRe = /[._-]([a-z]{2})(?:[-_]?([a-z]{2}))?\.(json|js)$/i;
+  let m = filename.match(suffixRe);
+  if (!m) {
+    // Try prefix at the start: en-GB_home.json | fr.home.json | es-home.json
+    const prefixRe = /^([a-z]{2})(?:[-_]?([a-z]{2}))?[._-]/i;
+    m = filename.match(prefixRe);
+  }
+  if (m) {
+    const lang = m[1].toLowerCase();
+    const region = m[2];
+    return region ? `${lang}-${region.toUpperCase()}` : lang;
   }
   return null;
+}
+
+export function detectLanguageFromPath(path: string): string | null {
+  // Inspect folder segments, e.g., en-GB/... or es_US/...; prefer region-specific
+  const segments = path.split(/[\\/]/);
+  let best: string | null = null;
+  for (const seg of segments) {
+    const m = seg.match(/^([a-z]{2})(?:[-_]?([a-z]{2}))$/i) || seg.match(/^([a-z]{2})$/i);
+    if (m) {
+      const lang = m[1].toLowerCase();
+      const region = (m as any)[2];
+      const code = region ? `${lang}-${String(region).toUpperCase()}` : lang;
+      // Prefer region-specific
+      if (!best || (/^[a-z]{2}$/.test(best) && /^[a-z]{2}-[A-Z]{2}$/.test(code))) {
+        best = code;
+      }
+    }
+  }
+  return best;
 }
 
 export function flattenJSON(obj: any, parentKey: string = ''): Record<string, string> {
@@ -78,11 +106,18 @@ export function flattenJSON(obj: any, parentKey: string = ''): Record<string, st
   return items;
 }
 
-export function getBaseName(fileName: string): string {
-  // Remove file extension and language codes
-  return fileName
-    .replace(/\.(json|js)$/i, '')
-    .replace(/[._-][a-z]{2}(?:-[A-Z]{2})?$/i, '');
+export function getBaseName(pathOrName: string): string {
+  // Normalize separators and remove language folders
+  const parts = pathOrName.split(/[\\/]/).filter(Boolean);
+  const isLangSeg = (s: string) => /^([a-z]{2})(?:[-_][A-Za-z]{2})?$/.test(s);
+  const filtered = parts.filter((seg) => !isLangSeg(seg));
+  const last = (filtered.length ? filtered : parts).slice(-1)[0] || '';
+  // Remove extension
+  let base = last.replace(/\.(json|js)$/i, '');
+  // Remove leading or trailing language codes in the filename
+  base = base.replace(/^([a-z]{2})(?:[-_][A-Za-z]{2})?[._-]+/i, '');
+  base = base.replace(/[._-]+([a-z]{2})(?:[-_][A-Za-z]{2})?$/i, '');
+  return base;
 }
 
 export function groupFilesByLanguage(files: JsonFile[]): Map<string, JsonFile[]> {
@@ -103,51 +138,57 @@ export function groupFilesByLanguage(files: JsonFile[]): Map<string, JsonFile[]>
 
 export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
   const pairs: LanguagePair[] = [];
-  const sourceLangCodes = ['en-GB', 'en-US'];
-  
+  // Prefer specific English variants, but allow plain 'en' fallback
+  const sourceLangPriority = ['en-GB', 'en-US', 'en'];
+
   console.debug(`[findLanguagePairs] Processing ${files.length} files`);
-  
-  // Group files by base name
+
+  // Group files by base name (normalized from path or name)
   const fileGroups = new Map<string, JsonFile[]>();
   files.forEach(file => {
-    const baseName = getBaseName(file.name);
+    const baseName = getBaseName(file.path || file.name);
     if (!fileGroups.has(baseName)) {
       fileGroups.set(baseName, []);
     }
     fileGroups.get(baseName)!.push(file);
   });
-  
+
   console.debug(`[findLanguagePairs] Found ${fileGroups.size} file groups:`, Array.from(fileGroups.keys()));
-  
+
   // For each base group, find source and target files
   fileGroups.forEach((group, baseName) => {
     console.debug(`[findLanguagePairs] Processing group "${baseName}" with ${group.length} files`);
-    
+
+    // Pick the best English source in priority order
+    const englishCandidates = group
+      .map((f) => ({ f, det: detectLanguageForFile(f) }))
+      .filter((x) => x.det.lang && x.det.lang.startsWith('en'));
+
     let sourceFile: JsonFile | null = null;
+    for (const pref of sourceLangPriority) {
+      const found = englishCandidates.find((x) => x.det.lang === pref);
+      if (found) {
+        sourceFile = found.f;
+        console.debug(`[findLanguagePairs] Selected source ${found.f.name} (${found.det.lang}, origin=${found.det.origin})`);
+        break;
+      }
+    }
+
     const targetFiles: JsonFile[] = [];
-    
     group.forEach(file => {
       const { lang: langCode, origin } = detectLanguageForFile(file);
-      console.debug(`[findLanguagePairs] File "${file.name}": detected language "${langCode}" (origin: ${origin})`);
-      
-      if (langCode && sourceLangCodes.includes(langCode)) {
-        sourceFile = file;
-        console.debug(`[findLanguagePairs] Set as source file: ${file.name} (${langCode})`);
-      } else if (langCode) {
+      if (file !== sourceFile && langCode && !langCode.startsWith('en')) {
         targetFiles.push(file);
-        console.debug(`[findLanguagePairs] Added as target file: ${file.name} (${langCode})`);
+        console.debug(`[findLanguagePairs] Added target: ${file.name} (${langCode}, origin=${origin})`);
       }
     });
-    
+
     if (sourceFile && targetFiles.length > 0) {
-      console.debug(`[findLanguagePairs] Found source file for group "${baseName}": ${sourceFile.name} with ${targetFiles.length} target files`);
-      
       targetFiles.forEach(targetFile => {
         const { lang: targetLang } = detectLanguageForFile(targetFile);
         const { lang: sourceLang } = detectLanguageForFile(sourceFile!);
-        
         if (sourceLang && targetLang) {
-          console.debug(`[findLanguagePairs] Creating language pair: ${sourceLang} → ${targetLang}`);
+          console.debug(`[findLanguagePairs] Creating pair: ${sourceLang} → ${targetLang} for base "${baseName}"`);
           pairs.push({
             sourceLanguage: sourceLang,
             targetLanguage: targetLang,
@@ -157,15 +198,18 @@ export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
         }
       });
     } else {
-      console.debug(`[findLanguagePairs] Group "${baseName}": sourceFile=${sourceFile?.name || 'null'}, targetFiles=${targetFiles.length}`);
+      const reasons = !sourceFile
+        ? `no English source found among: ${group.map(g => `${g.name}(${detectLanguageForFile(g).lang || 'n/a'})`).join(', ')}`
+        : `have source but ${targetFiles.length} targets`;
+      console.debug(`[findLanguagePairs] Skipping group "${baseName}": ${reasons}`);
     }
   });
-  
+
   console.debug(`[findLanguagePairs] Final result: ${pairs.length} language pairs found`);
   pairs.forEach((pair, index) => {
     console.debug(`[findLanguagePairs] Pair ${index + 1}: ${pair.sourceLanguage} → ${pair.targetLanguage}`);
   });
-  
+
   return pairs;
 }
 
@@ -185,11 +229,9 @@ export function parseJsonFiles(sourceFiles: JsonFile[], targetFiles: JsonFile[])
 
   sourceFiles.forEach(sourceFile => {
     try {
-      const baseName = getBaseName(sourceFile.name);
-      
+      const baseName = getBaseName(sourceFile.path || sourceFile.name);
       // Find corresponding target file with same base name
-      const targetFile = targetFiles.find(tf => getBaseName(tf.name) === baseName);
-      
+      const targetFile = targetFiles.find(tf => getBaseName(tf.path || tf.name) === baseName);
       if (!targetFile) {
         errors.push(`No corresponding target file found for ${sourceFile.name}`);
         return;
