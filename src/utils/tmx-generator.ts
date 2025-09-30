@@ -23,14 +23,15 @@ export function generateTMX(
 </tmx>`;
 
   const translationUnitElements = translationUnits.map(tu => {
-    // Escape XML special characters
+    // Escape XML special characters and encode non-breaking spaces
     const escapeXml = (text: string) => {
       return text
         .replace(/&/g, '&amp;')
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
+        .replace(/'/g, '&apos;')
+        .replace(/\u00A0/g, '&nbsp;'); // Non-breaking space
     };
 
     return `

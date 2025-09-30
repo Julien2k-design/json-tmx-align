@@ -1,10 +1,15 @@
 import React, { useState, useCallback } from 'react';
 import { FileUpload } from './file-upload';
 import { ProcessingStatus } from './processing-status';
+import { TMXPreview } from './tmx-preview';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
-import { Download, Languages, RefreshCw, Building2 } from 'lucide-react';
-import { JsonFile, TMXExport, ProcessingStatus as ProcessingStatusType } from '@/types/json-tmx';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Download, Languages, RefreshCw, Building2, FileStack } from 'lucide-react';
+import { JsonFile, TMXExport, ProcessingStatus as ProcessingStatusType, TranslationUnit } from '@/types/json-tmx';
 import { findLanguagePairs, parseJsonFiles, detectLanguageForFile, getBaseName } from '@/utils/json-parser';
 import { generateTMX, downloadTMX } from '@/utils/tmx-generator';
 import { useToast } from '@/hooks/use-toast';
@@ -17,6 +22,8 @@ export function JsonTmxConverter() {
     isProcessing: false,
     progress: 0,
   });
+  const [combinedMode, setCombinedMode] = useState(false);
+  const [selectedPreview, setSelectedPreview] = useState<TMXExport | null>(null);
   
   const { toast } = useToast();
 
@@ -142,15 +149,50 @@ export function JsonTmxConverter() {
   }, [toast]);
 
   const downloadAllTmxFiles = useCallback(() => {
-    tmxExports.forEach(tmxExport => {
-      setTimeout(() => downloadTmxFile(tmxExport), 100);
-    });
-  }, [tmxExports, downloadTmxFile]);
+    if (combinedMode) {
+      // Download one combined TMX with all translation units
+      const allUnits: TranslationUnit[] = [];
+      const allErrors: string[] = [];
+      
+      tmxExports.forEach(tmxExport => {
+        allUnits.push(...tmxExport.translationUnits);
+        allErrors.push(...tmxExport.errors);
+      });
+      
+      if (allUnits.length === 0) {
+        toast({
+          title: "No Data",
+          description: "No translation units available for export.",
+          variant: "destructive",
+        });
+        return;
+      }
+      
+      // Use the first pair's languages as default
+      const sourceLang = tmxExports[0]?.languagePair.sourceLanguage || 'en';
+      const targetLangs = Array.from(new Set(tmxExports.map(e => e.languagePair.targetLanguage))).join('_');
+      
+      const tmxContent = generateTMX(allUnits, sourceLang, targetLangs);
+      const filename = `translation_memory_combined_${sourceLang}_${targetLangs}.tmx`;
+      downloadTMX(tmxContent, filename);
+      
+      toast({
+        title: "Combined TMX Downloaded",
+        description: `Downloaded ${filename} with ${allUnits.length} translation units from ${tmxExports.length} language pairs.`,
+      });
+    } else {
+      // Download individual TMX files
+      tmxExports.forEach((tmxExport, index) => {
+        setTimeout(() => downloadTmxFile(tmxExport), index * 100);
+      });
+    }
+  }, [tmxExports, downloadTmxFile, combinedMode, toast]);
 
   const reset = useCallback(() => {
     setAllFiles([]);
     setTmxExports([]);
     setDetectedLanguages([]);
+    setSelectedPreview(null);
     setProcessingStatus({
       isProcessing: false,
       progress: 0,
@@ -203,49 +245,109 @@ export function JsonTmxConverter() {
             </div>
           </div>
         )}
+
+        {allFiles.length > 0 && (
+          <div className="mt-4">
+            <h3 className="font-medium text-foreground mb-2">Detection Summary:</h3>
+            <ScrollArea className="h-[200px] rounded-md border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>File</TableHead>
+                    <TableHead>Language</TableHead>
+                    <TableHead>Origin</TableHead>
+                    <TableHead>Base Name</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {allFiles.map((file, index) => {
+                    const { lang, origin } = detectLanguageForFile(file);
+                    const base = getBaseName(file.path || file.name);
+                    return (
+                      <TableRow key={index}>
+                        <TableCell className="font-mono text-xs">{file.path || file.name}</TableCell>
+                        <TableCell>
+                          <span className="px-2 py-1 bg-primary/10 text-primary rounded text-xs">
+                            {lang || 'unknown'}
+                          </span>
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground">{origin || 'N/A'}</TableCell>
+                        <TableCell className="font-mono text-xs">{base}</TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </ScrollArea>
+          </div>
+        )}
       </Card>
 
       {/* Processing Actions */}
-      <div className="flex justify-center space-x-4">
-        <Button
-          onClick={processFiles}
-          disabled={allFiles.length === 0 || processingStatus.isProcessing}
-          variant="hero"
-          size="lg"
-        >
-          {processingStatus.isProcessing ? (
-            <>
-              <RefreshCw className="w-4 h-4 animate-spin" />
-              Processing...
-            </>
-          ) : (
-            <>
-              <Languages className="w-4 h-4" />
-              Auto-Detect & Process
-            </>
-          )}
-        </Button>
-        
-        {tmxExports.length > 0 && (
+      <div className="flex flex-col items-center space-y-4">
+        <div className="flex justify-center space-x-4">
           <Button
-            onClick={downloadAllTmxFiles}
-            variant="success"
+            onClick={processFiles}
+            disabled={allFiles.length === 0 || processingStatus.isProcessing}
+            variant="hero"
             size="lg"
           >
-            <Download className="w-4 h-4" />
-            Download All TMX
+            {processingStatus.isProcessing ? (
+              <>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                Processing...
+              </>
+            ) : (
+              <>
+                <Languages className="w-4 h-4" />
+                Auto-Detect & Process
+              </>
+            )}
           </Button>
-        )}
+          
+          {tmxExports.length > 0 && (
+            <Button
+              onClick={downloadAllTmxFiles}
+              variant="success"
+              size="lg"
+            >
+              {combinedMode ? <FileStack className="w-4 h-4" /> : <Download className="w-4 h-4" />}
+              {combinedMode ? 'Download Combined TMX' : 'Download All TMX'}
+            </Button>
+          )}
+          
+          <Button
+            onClick={reset}
+            variant="outline"
+            size="lg"
+            disabled={processingStatus.isProcessing}
+          >
+            Reset
+          </Button>
+        </div>
         
-        <Button
-          onClick={reset}
-          variant="outline"
-          size="lg"
-          disabled={processingStatus.isProcessing}
-        >
-          Reset
-        </Button>
+        {tmxExports.length > 0 && (
+          <div className="flex items-center space-x-2 bg-secondary px-4 py-2 rounded-lg">
+            <Switch
+              id="combined-mode"
+              checked={combinedMode}
+              onCheckedChange={setCombinedMode}
+            />
+            <Label htmlFor="combined-mode" className="cursor-pointer">
+              Export as single combined TMX file
+            </Label>
+          </div>
+        )}
       </div>
+
+      {/* Preview Pane */}
+      {selectedPreview && (
+        <TMXPreview
+          translationUnits={selectedPreview.translationUnits}
+          sourceLanguage={selectedPreview.languagePair.sourceLanguage}
+          targetLanguage={selectedPreview.languagePair.targetLanguage}
+        />
+      )}
 
       {/* TMX Export Results */}
       {tmxExports.length > 0 && (
@@ -253,8 +355,8 @@ export function JsonTmxConverter() {
           <h2 className="text-xl font-semibold mb-4 text-foreground">Generated TMX Files</h2>
           <div className="space-y-4">
             {tmxExports.map((tmxExport, index) => (
-              <div key={index} className="flex items-center justify-between p-4 bg-secondary rounded-lg">
-                <div>
+              <div key={index} className="flex items-center justify-between p-4 bg-secondary rounded-lg hover:bg-secondary/80 transition-colors">
+                <div className="flex-1">
                   <h3 className="font-medium text-foreground">
                     {tmxExport.languagePair.sourceLanguage.toUpperCase()} → {tmxExport.languagePair.targetLanguage.toUpperCase()}
                   </h3>
@@ -265,14 +367,23 @@ export function JsonTmxConverter() {
                     )}
                   </p>
                 </div>
-                <Button
-                  onClick={() => downloadTmxFile(tmxExport)}
-                  variant="outline"
-                  size="sm"
-                >
-                  <Download className="w-4 h-4" />
-                  Download
-                </Button>
+                <div className="flex space-x-2">
+                  <Button
+                    onClick={() => setSelectedPreview(tmxExport)}
+                    variant={selectedPreview === tmxExport ? "default" : "outline"}
+                    size="sm"
+                  >
+                    Preview
+                  </Button>
+                  <Button
+                    onClick={() => downloadTmxFile(tmxExport)}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Download className="w-4 h-4" />
+                    Download
+                  </Button>
+                </div>
               </div>
             ))}
           </div>
