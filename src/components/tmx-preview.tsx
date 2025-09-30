@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Search } from 'lucide-react';
 import { TranslationUnit } from '@/types/json-tmx';
+import { decodeHtmlEntities } from '@/utils/html-entities';
 
 interface TMXPreviewProps {
   translationUnits: TranslationUnit[];
@@ -65,9 +66,9 @@ export function TMXPreview({ translationUnits, sourceLanguage, targetLanguage }:
               ) : (
                 filteredUnits.map((unit, index) => (
                   <TableRow key={index}>
-                    <TableCell className="font-mono text-xs">{unit.keyPath}</TableCell>
-                    <TableCell className="text-sm">{unit.sourceText}</TableCell>
-                    <TableCell className="text-sm">{unit.targetText}</TableCell>
+                    <TableCell className="font-mono text-xs">{decodeHtmlEntities(unit.keyPath)}</TableCell>
+                    <TableCell className="text-sm">{decodeHtmlEntities(unit.sourceText)}</TableCell>
+                    <TableCell className="text-sm">{decodeHtmlEntities(unit.targetText)}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
                       {unit.filePath || 'N/A'}
                     </TableCell>

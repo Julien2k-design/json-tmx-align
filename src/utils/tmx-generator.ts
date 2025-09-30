@@ -1,4 +1,5 @@
 import { TranslationUnit } from '@/types/json-tmx';
+import { decodeHtmlEntities } from './html-entities';
 
 export function generateTMX(
   translationUnits: TranslationUnit[],
@@ -23,38 +24,7 @@ export function generateTMX(
 </tmx>`;
 
   const translationUnitElements = translationUnits.map(tu => {
-    // Decode HTML entities first, then escape XML special characters
-    const decodeHtmlEntities = (text: string) => {
-      const entityMap: { [key: string]: string } = {
-        'agrave': 'à', 'aacute': 'á', 'acirc': 'â', 'atilde': 'ã', 'auml': 'ä', 'aring': 'å',
-        'Agrave': 'À', 'Aacute': 'Á', 'Acirc': 'Â', 'Atilde': 'Ã', 'Auml': 'Ä', 'Aring': 'Å',
-        'ccedil': 'ç', 'Ccedil': 'Ç',
-        'egrave': 'è', 'eacute': 'é', 'ecirc': 'ê', 'euml': 'ë',
-        'Egrave': 'È', 'Eacute': 'É', 'Ecirc': 'Ê', 'Euml': 'Ë',
-        'igrave': 'ì', 'iacute': 'í', 'icirc': 'î', 'iuml': 'ï',
-        'Igrave': 'Ì', 'Iacute': 'Í', 'Icirc': 'Î', 'Iuml': 'Ï',
-        'ograve': 'ò', 'oacute': 'ó', 'ocirc': 'ô', 'otilde': 'õ', 'ouml': 'ö',
-        'Ograve': 'Ò', 'Oacute': 'Ó', 'Ocirc': 'Ô', 'Otilde': 'Õ', 'Ouml': 'Ö',
-        'ugrave': 'ù', 'uacute': 'ú', 'ucirc': 'û', 'uuml': 'ü',
-        'Ugrave': 'Ù', 'Uacute': 'Ú', 'Ucirc': 'Û', 'Uuml': 'Ü',
-        'yacute': 'ý', 'yuml': 'ÿ', 'Yacute': 'Ý',
-        'nbsp': '\u00A0', 'iexcl': '¡', 'iquest': '¿',
-        'laquo': '«', 'raquo': '»', 'quot': '"', 'apos': "'",
-        'amp': '&', 'lt': '<', 'gt': '>',
-        'hellip': '…', 'ndash': '–', 'mdash': '—',
-        'copy': '©', 'reg': '®', 'trade': '™',
-        'euro': '€', 'pound': '£', 'yen': '¥', 'cent': '¢'
-      };
-      
-      return text
-        // Decode named entities
-        .replace(/&([a-zA-Z]+);/g, (match, entity) => entityMap[entity] || match)
-        // Decode numeric entities (decimal)
-        .replace(/&#(\d+);/g, (match, dec) => String.fromCodePoint(parseInt(dec, 10)))
-        // Decode numeric entities (hexadecimal)
-        .replace(/&#x([0-9A-Fa-f]+);/g, (match, hex) => String.fromCodePoint(parseInt(hex, 16)));
-    };
-    
+    // XML escape function - only escapes special XML characters
     const escapeXml = (text: string) => {
       return text
         .replace(/&/g, '&amp;')
