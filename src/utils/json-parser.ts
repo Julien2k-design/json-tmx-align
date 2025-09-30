@@ -1,9 +1,39 @@
 import { JsonFile, TranslationUnit, LanguagePair } from '@/types/json-tmx';
 
+export function detectLanguageFromJson(jsonContent: any): string | null {
+  // Detect language from JSON content (language + locale fields)
+  if (jsonContent.language && jsonContent.locale) {
+    return `${jsonContent.language.toLowerCase()}-${jsonContent.locale.toUpperCase()}`;
+  }
+  return null;
+}
+
 export function detectLanguageFromFilename(filename: string): string | null {
   // Match patterns like: file_en-GB.json, file.en-US.json, file-es-ES.json
   const langMatch = filename.match(/[._-]([a-z]{2}(?:-[A-Z]{2})?)\.(json|js)$/i);
   return langMatch ? langMatch[1].toLowerCase() : null;
+}
+
+export function flattenJSON(obj: any, parentKey: string = ''): Record<string, string> {
+  const items: Record<string, string> = {};
+  
+  for (const key in obj) {
+    if (obj.hasOwnProperty(key)) {
+      const newKey = parentKey ? `${parentKey}.${key}` : key;
+      
+      if (typeof obj[key] === 'object' && !Array.isArray(obj[key]) && obj[key] !== null) {
+        Object.assign(items, flattenJSON(obj[key], newKey));
+      } else if (Array.isArray(obj[key])) {
+        obj[key].forEach((item: any, idx: number) => {
+          Object.assign(items, flattenJSON({[idx]: item}, newKey));
+        });
+      } else if (typeof obj[key] === 'string') {
+        items[newKey] = obj[key];
+      }
+    }
+  }
+  
+  return items;
 }
 
 export function getBaseName(fileName: string): string {
@@ -17,7 +47,7 @@ export function groupFilesByLanguage(files: JsonFile[]): Map<string, JsonFile[]>
   const languageGroups = new Map<string, JsonFile[]>();
   
   files.forEach(file => {
-    const language = detectLanguageFromFilename(file.name);
+    const language = detectLanguageFromJson(file.content);
     if (language) {
       if (!languageGroups.has(language)) {
         languageGroups.set(language, []);
@@ -30,33 +60,48 @@ export function groupFilesByLanguage(files: JsonFile[]): Map<string, JsonFile[]>
 }
 
 export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
-  const languageGroups = groupFilesByLanguage(files);
   const pairs: LanguagePair[] = [];
+  const sourceLangCodes = ['en-GB', 'en-US'];
   
-  // Find English source languages (en, en-gb, en-us)
-  const englishLangs = Array.from(languageGroups.keys()).filter(lang => 
-    lang.startsWith('en')
-  );
+  // Group files by base name
+  const fileGroups = new Map<string, JsonFile[]>();
+  files.forEach(file => {
+    const baseName = getBaseName(file.name);
+    if (!fileGroups.has(baseName)) {
+      fileGroups.set(baseName, []);
+    }
+    fileGroups.get(baseName)!.push(file);
+  });
   
-  // Find target languages (non-English)
-  const targetLangs = Array.from(languageGroups.keys()).filter(lang => 
-    !lang.startsWith('en')
-  );
-  
-  englishLangs.forEach(sourceLang => {
-    targetLangs.forEach(targetLang => {
-      const sourceFiles = languageGroups.get(sourceLang) || [];
-      const targetFiles = languageGroups.get(targetLang) || [];
-      
-      if (sourceFiles.length > 0 && targetFiles.length > 0) {
-        pairs.push({
-          sourceLanguage: sourceLang,
-          targetLanguage: targetLang,
-          sourceFiles,
-          targetFiles
-        });
+  // For each base group, find source and target files
+  fileGroups.forEach((group, baseName) => {
+    let sourceFile: JsonFile | null = null;
+    const targetFiles: JsonFile[] = [];
+    
+    group.forEach(file => {
+      const langCode = detectLanguageFromJson(file.content);
+      if (langCode && sourceLangCodes.includes(langCode)) {
+        sourceFile = file;
+      } else if (langCode) {
+        targetFiles.push(file);
       }
     });
+    
+    if (sourceFile && targetFiles.length > 0) {
+      targetFiles.forEach(targetFile => {
+        const targetLang = detectLanguageFromJson(targetFile.content);
+        const sourceLang = detectLanguageFromJson(sourceFile!.content);
+        
+        if (sourceLang && targetLang) {
+          pairs.push({
+            sourceLanguage: sourceLang,
+            targetLanguage: targetLang,
+            sourceFiles: [sourceFile!],
+            targetFiles: [targetFile]
+          });
+        }
+      });
+    }
   });
   
   return pairs;
@@ -71,35 +116,43 @@ export function parseJsonFiles(sourceFiles: JsonFile[], targetFiles: JsonFile[])
   const errors: string[] = [];
   const missingKeys: string[] = [];
 
-  // Create a map of target files by base name for quick lookup
-  const targetFileMap = new Map<string, JsonFile>();
-  targetFiles.forEach(file => {
-    const baseName = getBaseName(file.name);
-    targetFileMap.set(baseName, file);
-  });
+  if (sourceFiles.length === 0) {
+    errors.push('No source files provided');
+    return { translationUnits, errors, missingKeys };
+  }
 
   sourceFiles.forEach(sourceFile => {
     try {
       const baseName = getBaseName(sourceFile.name);
-      const targetFile = targetFileMap.get(baseName);
-
+      
+      // Find corresponding target file with same base name
+      const targetFile = targetFiles.find(tf => getBaseName(tf.name) === baseName);
+      
       if (!targetFile) {
-        errors.push(`No matching target file found for source: ${sourceFile.name}`);
+        errors.push(`No corresponding target file found for ${sourceFile.name}`);
         return;
       }
 
-      const sourceJson = sourceFile.content;
-      const targetJson = targetFile.content;
-
-      const fileUnits = extractTranslationUnits(
-        sourceJson,
-        targetJson,
-        '',
-        sourceFile.name
-      );
-
-      translationUnits.push(...fileUnits.units);
-      missingKeys.push(...fileUnits.missing);
+      // Flatten both source and target JSON
+      const sourceFlat = flattenJSON(sourceFile.content);
+      const targetFlat = flattenJSON(targetFile.content);
+      
+      // Create translation units from flattened data
+      Object.entries(sourceFlat).forEach(([key, sourceText]) => {
+        const targetText = targetFlat[key] || '';
+        
+        if (!targetText) {
+          missingKeys.push(`Missing target for key "${key}" in ${targetFile.name}`);
+        }
+        
+        translationUnits.push({
+          sourceText,
+          targetText,
+          keyPath: key,
+          filePath: sourceFile.name
+        });
+      });
+      
     } catch (error) {
       errors.push(`Error processing ${sourceFile.name}: ${error}`);
     }
