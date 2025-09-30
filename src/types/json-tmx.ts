@@ -1,0 +1,26 @@
+export interface JsonFile {
+  name: string;
+  content: any;
+  path?: string;
+}
+
+export interface TranslationUnit {
+  sourceText: string;
+  targetText: string;
+  keyPath: string;
+  filePath?: string;
+}
+
+export interface AlignmentResult {
+  translationUnits: TranslationUnit[];
+  errors: string[];
+  missingKeys: string[];
+  processedFiles: number;
+}
+
+export interface ProcessingStatus {
+  isProcessing: boolean;
+  progress: number;
+  currentFile?: string;
+  message?: string;
+}
