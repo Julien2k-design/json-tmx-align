@@ -11,11 +11,30 @@ interface TagInfo {
   tagName: string;
   index: number;
   pairId?: number;
+  tmxType?: string;
 }
+
+/**
+ * Maps HTML tag names to TMX type attributes for CAT tool compatibility
+ */
+const HTML_TO_TMX_TYPE: Record<string, string> = {
+  'b': 'bold',
+  'strong': 'bold',
+  'i': 'italic',
+  'em': 'italic',
+  'u': 'underline',
+  'a': 'link',
+  'br': 'lb',
+  'img': 'image',
+  'span': 'formatting',
+  'div': 'formatting',
+  'p': 'formatting',
+};
 
 export function convertHtmlTagsToTmxInline(text: string): string {
   const tags: TagInfo[] = [];
   let tagIdCounter = 1;
+  let xCounter = 1; // Sequential unique ID for each inline element
   const tagStack: { tagName: string; id: number; startIndex: number }[] = [];
 
   // Regex to match HTML tags
@@ -97,6 +116,12 @@ export function convertHtmlTagsToTmxInline(text: string): string {
     }
   }
 
+  // Assign TMX type to each tag based on HTML tag name
+  for (const tag of tags) {
+    const lowerTagName = tag.tagName.toLowerCase();
+    tag.tmxType = HTML_TO_TMX_TYPE[lowerTagName] || 'formatting';
+  }
+
   // Second pass: replace tags with TMX inline elements (from end to start to preserve indices)
   tags.sort((a, b) => b.index - a.index);
 
@@ -107,14 +132,14 @@ export function convertHtmlTagsToTmxInline(text: string): string {
 
     switch (tag.type) {
       case 'paired-start':
-        tmxInline = `<bpt i="${tag.pairId}">${escapedTag}</bpt>`;
+        tmxInline = `<bpt i="${tag.pairId}" x="${xCounter++}" type="${tag.tmxType}">${escapedTag}</bpt>`;
         break;
       case 'paired-end':
-        tmxInline = `<ept i="${tag.pairId}">${escapedTag}</ept>`;
+        tmxInline = `<ept i="${tag.pairId}" type="${tag.tmxType}">${escapedTag}</ept>`;
         break;
       case 'self-closing':
       case 'standalone':
-        tmxInline = `<ph i="${tag.pairId}">${escapedTag}</ph>`;
+        tmxInline = `<ph x="${xCounter++}" type="${tag.tmxType}">${escapedTag}</ph>`;
         break;
     }
 
