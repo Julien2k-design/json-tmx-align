@@ -150,16 +150,18 @@ export function JsonTmxConverter() {
 
   const downloadAllTmxFiles = useCallback(() => {
     if (combinedMode) {
-      // Download one combined TMX with all translation units
-      const allUnits: TranslationUnit[] = [];
-      const allErrors: string[] = [];
+      // Group by target language and download one combined TMX per target language
+      const languageGroups = new Map<string, TMXExport[]>();
       
-      tmxExports.forEach(tmxExport => {
-        allUnits.push(...tmxExport.translationUnits);
-        allErrors.push(...tmxExport.errors);
+      tmxExports.forEach(exp => {
+        const targetLang = exp.languagePair.targetLanguage;
+        if (!languageGroups.has(targetLang)) {
+          languageGroups.set(targetLang, []);
+        }
+        languageGroups.get(targetLang)!.push(exp);
       });
       
-      if (allUnits.length === 0) {
+      if (languageGroups.size === 0) {
         toast({
           title: "No Data",
           description: "No translation units available for export.",
@@ -168,17 +170,26 @@ export function JsonTmxConverter() {
         return;
       }
       
-      // Use the first pair's languages as default
-      const sourceLang = tmxExports[0]?.languagePair.sourceLanguage || 'en';
-      const targetLangs = Array.from(new Set(tmxExports.map(e => e.languagePair.targetLanguage))).join('_');
+      let totalDownloads = 0;
+      let totalUnits = 0;
       
-      const tmxContent = generateTMX(allUnits, sourceLang, targetLangs);
-      const filename = `translation_memory_combined_${sourceLang}_${targetLangs}.tmx`;
-      downloadTMX(tmxContent, filename);
+      // Download one combined TMX per target language
+      languageGroups.forEach((exports, targetLang) => {
+        const allUnits = exports.flatMap(e => e.translationUnits);
+        const sourceLang = exports[0].languagePair.sourceLanguage;
+        
+        const tmxContent = generateTMX(allUnits, sourceLang, targetLang);
+        const filename = `translation_memory_combined_${sourceLang}_${targetLang}.tmx`;
+        
+        setTimeout(() => downloadTMX(tmxContent, filename), totalDownloads * 100);
+        
+        totalDownloads++;
+        totalUnits += allUnits.length;
+      });
       
       toast({
-        title: "Combined TMX Downloaded",
-        description: `Downloaded ${filename} with ${allUnits.length} translation units from ${tmxExports.length} language pairs.`,
+        title: "Combined TMX Files Downloaded",
+        description: `Downloaded ${totalDownloads} combined TMX file(s) with ${totalUnits} total translation units.`,
       });
     } else {
       // Download individual TMX files
@@ -214,8 +225,7 @@ export function JsonTmxConverter() {
           JSON to TMX Converter
         </h1>
         <p className="text-lg text-muted-foreground max-w-2xl mx-auto">
-          Automatically detect language pairs and transform JSON localization files into Translation Memory eXchange (TMX) format 
-          for seamless integration with CAT tools like SDL Trados, MemoQ, and Memsource.
+          Automatically detect language pairs and transform JSON localization files into Translation Memory eXchange (TMX) format.
         </p>
       </div>
 
@@ -334,7 +344,7 @@ export function JsonTmxConverter() {
               onCheckedChange={setCombinedMode}
             />
             <Label htmlFor="combined-mode" className="cursor-pointer">
-              Export as single combined TMX file
+              Combine files per target language
             </Label>
           </div>
         )}
