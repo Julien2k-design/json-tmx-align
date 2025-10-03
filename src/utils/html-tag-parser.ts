@@ -196,7 +196,7 @@ export function escapeXmlExceptTmxTags(text: string): string {
  */
 export function tmxInlineToPlaceholders(text: string): string {
   return text
-    .replace(/<bpt i="(\d+)">[^<]*<\/bpt>/g, '{$1}')
-    .replace(/<ept i="(\d+)">[^<]*<\/ept>/g, '{/$1}')
-    .replace(/<ph i="(\d+)">[^<]*<\/ph>/g, '{$1}');
+    .replace(/<bpt i="(\d+)"[^>]*>.*?<\/bpt>/g, '{$1}')
+    .replace(/<ept i="(\d+)"[^>]*>.*?<\/ept>/g, '{/$1}')
+    .replace(/<ph x="(\d+)"[^>]*>.*?<\/ph>/g, '{$1}');
 }
