@@ -1,5 +1,6 @@
 import { TranslationUnit } from '@/types/json-tmx';
 import { decodeHtmlEntities } from './html-entities';
+import { convertHtmlTagsToTmxInline, escapeXmlExceptTmxTags } from './html-tag-parser';
 
 export function generateTMX(
   translationUnits: TranslationUnit[],
@@ -24,17 +25,16 @@ export function generateTMX(
 </tmx>`;
 
   const translationUnitElements = translationUnits.map(tu => {
-    // XML escape function - only escapes special XML characters
-    const escapeXml = (text: string) => {
-      return text
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
+    const processText = (text: string) => {
+      // Step 1: Decode HTML entities (e.g., &eacute; → é)
+      const decoded = decodeHtmlEntities(text);
+      
+      // Step 2: Convert HTML tags to TMX inline elements (e.g., <b> → <bpt>)
+      const withInlineTags = convertHtmlTagsToTmxInline(decoded);
+      
+      // Step 3: Escape remaining XML characters (but preserve TMX tags)
+      return escapeXmlExceptTmxTags(withInlineTags);
     };
-
-    const processText = (text: string) => escapeXml(decodeHtmlEntities(text));
 
     return `
     <tu tuid="${generateTUID(tu)}">
