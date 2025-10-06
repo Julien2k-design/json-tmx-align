@@ -22,33 +22,45 @@ export function segmentIntoSentences(text: string): string[] {
     });
   });
   
-  // Split on sentence-ending punctuation: . ! ? :
-  // Matches punctuation followed by whitespace or end of string
-  const sentencePattern = /[.!?:]+(?=\s|$)/g;
+  // STAGE 1: Split on bullet points and newlines
+  // Matches: •, -, *, –, — (when preceded by whitespace)
+  const bulletPattern = /(?=\s*[•\-\*–—]\s+)|(?:\r?\n)+/g;
+  const bulletSegments = processedText.split(bulletPattern)
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
   
-  const segments: string[] = [];
-  let lastIndex = 0;
-  let match;
+  // STAGE 2: Apply sentence splitting to each bullet segment
+  const allSegments: string[] = [];
   
-  while ((match = sentencePattern.exec(processedText)) !== null) {
-    const endIndex = match.index + match[0].length;
-    const segment = processedText.substring(lastIndex, endIndex).trim();
-    if (segment) {
-      segments.push(segment);
+  for (const bulletSegment of bulletSegments) {
+    const sentencePattern = /[.!?:]+(?=\s|$)/g;
+    const segments: string[] = [];
+    let lastIndex = 0;
+    let match;
+    
+    while ((match = sentencePattern.exec(bulletSegment)) !== null) {
+      const endIndex = match.index + match[0].length;
+      const segment = bulletSegment.substring(lastIndex, endIndex).trim();
+      if (segment) segments.push(segment);
+      lastIndex = endIndex;
     }
-    lastIndex = endIndex;
-  }
-  
-  // Add remaining text if any
-  if (lastIndex < processedText.length) {
-    const remaining = processedText.substring(lastIndex).trim();
-    if (remaining) {
-      segments.push(remaining);
+    
+    // Add remaining text
+    if (lastIndex < bulletSegment.length) {
+      const remaining = bulletSegment.substring(lastIndex).trim();
+      if (remaining) segments.push(remaining);
     }
+    
+    // If no sentence splits, add the whole bullet segment
+    if (segments.length === 0 && bulletSegment.trim()) {
+      segments.push(bulletSegment.trim());
+    }
+    
+    allSegments.push(...segments);
   }
   
   // Restore abbreviations
-  const restoredSegments = segments.map(segment => {
+  const restoredSegments = allSegments.map(segment => {
     let restored = segment;
     abbrevMap.forEach((original, placeholder) => {
       restored = restored.replace(new RegExp(placeholder, 'g'), original);
@@ -314,29 +326,18 @@ export function parseJsonFiles(
         }
         
         // Apply sentence segmentation if enabled
-        if (enableSegmentation && sourceText && targetText) {
+        if (enableSegmentation) {
           const sourceSegments = segmentIntoSentences(sourceText);
-          const targetSegments = segmentIntoSentences(targetText);
+          const targetSegments = targetText ? segmentIntoSentences(targetText) : [];
           
-          // Create a translation unit for each segment
-          const maxSegments = Math.max(sourceSegments.length, targetSegments.length);
+          const maxSegments = Math.max(sourceSegments.length, targetSegments.length || 1);
           
-          if (maxSegments > 1) {
-            // Multiple segments - create separate TUs
-            for (let i = 0; i < maxSegments; i++) {
-              translationUnits.push({
-                sourceText: sourceSegments[i] || '',
-                targetText: targetSegments[i] || '',
-                keyPath: `${key}[seg:${i + 1}]`,
-                filePath: sourceFile.name
-              });
-            }
-          } else {
-            // Single segment or no segmentation needed
+          // Always create segmented TUs (even for single segments)
+          for (let i = 0; i < maxSegments; i++) {
             translationUnits.push({
-              sourceText,
-              targetText,
-              keyPath: key,
+              sourceText: sourceSegments[i] || '',
+              targetText: targetSegments[i] || '',
+              keyPath: `${key}[seg:${i + 1}]`,
               filePath: sourceFile.name
             });
           }
