@@ -337,8 +337,10 @@ export function parseJsonFiles(
             translationUnits.push({
               sourceText: sourceSegments[i] || '',
               targetText: targetSegments[i] || '',
-              keyPath: `${key}[seg:${i + 1}]`,
-              filePath: sourceFile.name
+              keyPath: key,
+              filePath: sourceFile.name,
+              segmentIndex: i + 1,
+              totalSegments: maxSegments
             });
           }
         } else {

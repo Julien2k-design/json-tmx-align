@@ -36,9 +36,13 @@ export function generateTMX(
       return escapeXmlExceptTmxTags(withInlineTags);
     };
 
+    const noteText = tu.segmentIndex 
+      ? `${tu.keyPath} (seg ${tu.segmentIndex}/${tu.totalSegments})${tu.filePath ? ` - ${tu.filePath}` : ''}`
+      : `${tu.keyPath}${tu.filePath ? ` (${tu.filePath})` : ''}`;
+    
     return `
     <tu tuid="${generateTUID(tu)}">
-      <note>${processText(tu.keyPath)}${tu.filePath ? ` (${tu.filePath})` : ''}</note>
+      <note>${processText(noteText)}</note>
       <tuv xml:lang="${sourceLanguage}">
         <seg>${processText(tu.sourceText)}</seg>
       </tuv>
@@ -53,7 +57,9 @@ export function generateTMX(
 
 function generateTUID(tu: TranslationUnit): string {
   // Generate a unique ID for the translation unit (Unicode-safe)
-  const combined = `${tu.keyPath}_${tu.sourceText}`;
+  const combined = tu.segmentIndex 
+    ? `${tu.keyPath}_${tu.segmentIndex}_${tu.sourceText}`
+    : `${tu.keyPath}_${tu.sourceText}`;
   const base64 = utf8ToBase64(combined);
   return base64.replace(/[+=\/]/g, '').substring(0, 16);
 }

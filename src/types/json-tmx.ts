@@ -9,6 +9,8 @@ export interface TranslationUnit {
   targetText: string;
   keyPath: string;
   filePath?: string;
+  segmentIndex?: number;
+  totalSegments?: number;
 }
 
 export interface AlignmentResult {
