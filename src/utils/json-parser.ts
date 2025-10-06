@@ -7,11 +7,13 @@ import { JsonFile, TranslationUnit, LanguagePair } from '@/types/json-tmx';
 export function segmentIntoSentences(text: string): string[] {
   if (!text || typeof text !== 'string') return [text];
   
+  // Protect decimal numbers from being split (e.g., "1.2" should not split)
+  let processedText = text.replace(/(\d)\.(\d)/g, '$1__DECIMAL_DOT__$2');
+  
   // Common abbreviations that shouldn't trigger sentence breaks
   const abbreviations = ['Dr', 'Mr', 'Mrs', 'Ms', 'Prof', 'Sr', 'Jr', 'Inc', 'Ltd', 'Co', 'Corp', 'etc', 'i.e', 'e.g', 'vs', 'U.S', 'U.K', 'A.M', 'P.M'];
   
   // Temporarily replace abbreviations with placeholders
-  let processedText = text;
   const abbrevMap = new Map<string, string>();
   abbreviations.forEach((abbrev, idx) => {
     const pattern = new RegExp(`\\b${abbrev}\\.`, 'gi');
@@ -22,51 +24,66 @@ export function segmentIntoSentences(text: string): string[] {
     });
   });
   
-  // STAGE 1: Split on bullet points and newlines
-  // Matches: •, -, *, –, — (when preceded by whitespace)
-  const bulletPattern = /(?=\s*[•\-\*–—]\s+)|(?:\r?\n)+/g;
-  const bulletSegments = processedText.split(bulletPattern)
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
+  // Handle bullets: insert sentinel before start-of-line bullets
+  // Only treat bullets as boundaries when they start a new line
+  processedText = processedText.replace(/(^|\r?\n)\s*([•*\-–—])\s+/g, '$1|||');
   
-  // STAGE 2: Apply sentence splitting to each bullet segment
-  const allSegments: string[] = [];
+  // Conservative sentence pattern: only .!? and ellipsis, NOT colons
+  // This prevents splitting on "Italian:" or similar constructs
+  const sentencePattern = /(?:\u2026|\.{3}|[.!?])(?=\s|$|<|["')\]])/g;
   
-  for (const bulletSegment of bulletSegments) {
-    const sentencePattern = /[.!?:]+(?=\s|$)/g;
-    const segments: string[] = [];
+  // Split on the bullet sentinel and sentence endings
+  const segments: string[] = [];
+  const parts = processedText.split('|||');
+  
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    
+    // Split this part on sentence endings
+    const sentences: string[] = [];
     let lastIndex = 0;
     let match;
     
-    while ((match = sentencePattern.exec(bulletSegment)) !== null) {
+    const regex = new RegExp(sentencePattern.source, sentencePattern.flags);
+    while ((match = regex.exec(trimmed)) !== null) {
       const endIndex = match.index + match[0].length;
-      const segment = bulletSegment.substring(lastIndex, endIndex).trim();
-      if (segment) segments.push(segment);
+      const sentence = trimmed.substring(lastIndex, endIndex).trim();
+      if (sentence) sentences.push(sentence);
       lastIndex = endIndex;
     }
     
     // Add remaining text
-    if (lastIndex < bulletSegment.length) {
-      const remaining = bulletSegment.substring(lastIndex).trim();
-      if (remaining) segments.push(remaining);
+    if (lastIndex < trimmed.length) {
+      const remaining = trimmed.substring(lastIndex).trim();
+      if (remaining) sentences.push(remaining);
     }
     
-    // If no sentence splits, add the whole bullet segment
-    if (segments.length === 0 && bulletSegment.trim()) {
-      segments.push(bulletSegment.trim());
+    // If no sentence splits, add the whole part
+    if (sentences.length === 0 && trimmed) {
+      sentences.push(trimmed);
     }
     
-    allSegments.push(...segments);
+    segments.push(...sentences);
   }
   
-  // Restore abbreviations
-  const restoredSegments = allSegments.map(segment => {
+  // Restore abbreviations and decimal dots, strip leading bullet markers
+  const restoredSegments = segments.map(segment => {
     let restored = segment;
+    
+    // Restore abbreviations
     abbrevMap.forEach((original, placeholder) => {
       restored = restored.replace(new RegExp(placeholder, 'g'), original);
     });
-    return restored;
-  });
+    
+    // Restore decimal dots
+    restored = restored.replace(/__DECIMAL_DOT__/g, '.');
+    
+    // Strip any leading bullet markers that might remain
+    restored = restored.replace(/^[•*\-–—]\s+/, '');
+    
+    return restored.trim();
+  }).filter(s => s.length > 0);
   
   // If no segments were created, return the original text
   return restoredSegments.length > 0 ? restoredSegments : [text];
@@ -326,21 +343,42 @@ export function parseJsonFiles(
         }
         
         // Apply sentence segmentation if enabled
-        if (enableSegmentation) {
+        if (enableSegmentation && sourceText.length > 0) {
           const sourceSegments = segmentIntoSentences(sourceText);
           const targetSegments = targetText ? segmentIntoSentences(targetText) : [];
           
-          const maxSegments = Math.max(sourceSegments.length, targetSegments.length || 1);
-          
-          // Always create segmented TUs (even for single segments)
-          for (let i = 0; i < maxSegments; i++) {
+          // Only segment if both source and target are non-empty AND segment counts match
+          if (targetText && sourceSegments.length === targetSegments.length && sourceSegments.length > 1) {
+            // Counts match - create per-segment TUs
+            for (let i = 0; i < sourceSegments.length; i++) {
+              translationUnits.push({
+                sourceText: sourceSegments[i],
+                targetText: targetSegments[i],
+                keyPath: key,
+                filePath: sourceFile.name,
+                segmentIndex: i + 1,
+                totalSegments: sourceSegments.length
+              });
+            }
+          } else if (targetText && sourceSegments.length !== targetSegments.length && sourceSegments.length > 1) {
+            // Mismatch - fall back to unsegmented
+            console.warn(
+              `Segmentation mismatch for key "${key}" in ${sourceFile.name} ` +
+              `(source=${sourceSegments.length}, target=${targetSegments.length}). Fallback to unsegmented.`
+            );
             translationUnits.push({
-              sourceText: sourceSegments[i] || '',
-              targetText: targetSegments[i] || '',
+              sourceText,
+              targetText,
               keyPath: key,
-              filePath: sourceFile.name,
-              segmentIndex: i + 1,
-              totalSegments: maxSegments
+              filePath: sourceFile.name
+            });
+          } else {
+            // Single segment or no target - create single TU
+            translationUnits.push({
+              sourceText,
+              targetText,
+              keyPath: key,
+              filePath: sourceFile.name
             });
           }
         } else {
