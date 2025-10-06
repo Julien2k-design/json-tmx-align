@@ -23,6 +23,7 @@ export function JsonTmxConverter() {
     progress: 0,
   });
   const [combinedMode, setCombinedMode] = useState(false);
+  const [segmentationEnabled, setSegmentationEnabled] = useState(false);
   const [selectedPreview, setSelectedPreview] = useState<TMXExport | null>(null);
   
   const { toast } = useToast();
@@ -83,7 +84,7 @@ export function JsonTmxConverter() {
           message: `Processing ${pair.sourceLanguage} → ${pair.targetLanguage}...`,
         });
         
-        const result = parseJsonFiles(pair.sourceFiles, pair.targetFiles);
+        const result = parseJsonFiles(pair.sourceFiles, pair.targetFiles, segmentationEnabled);
         
         exports.push({
           languagePair: pair,
@@ -104,9 +105,11 @@ export function JsonTmxConverter() {
 
       const totalUnits = exports.reduce((sum, exp) => sum + exp.translationUnits.length, 0);
       
+      const segmentationNote = segmentationEnabled ? ' (with sentence segmentation)' : '';
+      
       toast({
         title: "Processing Complete",
-        description: `Generated ${exports.length} TMX files with ${totalUnits} translation units total.`,
+        description: `Generated ${exports.length} TMX files with ${totalUnits} translation units total${segmentationNote}.`,
       });
 
     } catch (error) {
@@ -121,7 +124,7 @@ export function JsonTmxConverter() {
         variant: "destructive",
       });
     }
-  }, [allFiles, toast]);
+  }, [allFiles, segmentationEnabled, toast]);
 
   const downloadTmxFile = useCallback((tmxExport: TMXExport) => {
     if (tmxExport.translationUnits.length === 0) {
@@ -348,6 +351,18 @@ export function JsonTmxConverter() {
             </Label>
           </div>
         )}
+        
+        <div className="flex items-center space-x-2 bg-secondary/50 px-4 py-2 rounded-lg border border-primary/20">
+          <Switch
+            id="segmentation-mode"
+            checked={segmentationEnabled}
+            onCheckedChange={setSegmentationEnabled}
+            disabled={processingStatus.isProcessing}
+          />
+          <Label htmlFor="segmentation-mode" className="cursor-pointer">
+            Enable sentence segmentation
+          </Label>
+        </div>
       </div>
 
       {/* Preview Pane */}

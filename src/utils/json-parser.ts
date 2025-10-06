@@ -1,5 +1,65 @@
 import { JsonFile, TranslationUnit, LanguagePair } from '@/types/json-tmx';
 
+/**
+ * Segments text into sentences based on punctuation marks.
+ * Handles edge cases like abbreviations, decimals, and HTML tags.
+ */
+export function segmentIntoSentences(text: string): string[] {
+  if (!text || typeof text !== 'string') return [text];
+  
+  // Common abbreviations that shouldn't trigger sentence breaks
+  const abbreviations = ['Dr', 'Mr', 'Mrs', 'Ms', 'Prof', 'Sr', 'Jr', 'Inc', 'Ltd', 'Co', 'Corp', 'etc', 'i.e', 'e.g', 'vs', 'U.S', 'U.K', 'A.M', 'P.M'];
+  
+  // Temporarily replace abbreviations with placeholders
+  let processedText = text;
+  const abbrevMap = new Map<string, string>();
+  abbreviations.forEach((abbrev, idx) => {
+    const pattern = new RegExp(`\\b${abbrev}\\.`, 'gi');
+    const placeholder = `__ABBREV_${idx}__`;
+    processedText = processedText.replace(pattern, (match) => {
+      abbrevMap.set(placeholder, match);
+      return placeholder;
+    });
+  });
+  
+  // Split on sentence-ending punctuation followed by space and capital letter, or end of string
+  // Handles: . ! ? : (when followed by space + capital or end of string)
+  const sentencePattern = /([.!?:]+)(?=\s+[A-ZÀ-ÖØ-Þ]|\s*$)/g;
+  
+  const segments: string[] = [];
+  let lastIndex = 0;
+  let match;
+  
+  while ((match = sentencePattern.exec(processedText)) !== null) {
+    const endIndex = match.index + match[0].length;
+    const segment = processedText.substring(lastIndex, endIndex).trim();
+    if (segment) {
+      segments.push(segment);
+    }
+    lastIndex = endIndex;
+  }
+  
+  // Add remaining text if any
+  if (lastIndex < processedText.length) {
+    const remaining = processedText.substring(lastIndex).trim();
+    if (remaining) {
+      segments.push(remaining);
+    }
+  }
+  
+  // Restore abbreviations
+  const restoredSegments = segments.map(segment => {
+    let restored = segment;
+    abbrevMap.forEach((original, placeholder) => {
+      restored = restored.replace(new RegExp(placeholder, 'g'), original);
+    });
+    return restored;
+  });
+  
+  // If no segments were created, return the original text
+  return restoredSegments.length > 0 ? restoredSegments : [text];
+}
+
 export function detectLanguageFromJson(jsonContent: any): string | null {
   // Detect language from JSON content (language + locale fields)
   if (jsonContent.language && jsonContent.locale) {
@@ -213,7 +273,11 @@ export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
   return pairs;
 }
 
-export function parseJsonFiles(sourceFiles: JsonFile[], targetFiles: JsonFile[]): {
+export function parseJsonFiles(
+  sourceFiles: JsonFile[], 
+  targetFiles: JsonFile[], 
+  enableSegmentation: boolean = false
+): {
   translationUnits: TranslationUnit[];
   errors: string[];
   missingKeys: string[];
@@ -249,12 +313,42 @@ export function parseJsonFiles(sourceFiles: JsonFile[], targetFiles: JsonFile[])
           missingKeys.push(`Missing target for key "${key}" in ${targetFile.name}`);
         }
         
-        translationUnits.push({
-          sourceText,
-          targetText,
-          keyPath: key,
-          filePath: sourceFile.name
-        });
+        // Apply sentence segmentation if enabled
+        if (enableSegmentation && sourceText && targetText) {
+          const sourceSegments = segmentIntoSentences(sourceText);
+          const targetSegments = segmentIntoSentences(targetText);
+          
+          // Create a translation unit for each segment
+          const maxSegments = Math.max(sourceSegments.length, targetSegments.length);
+          
+          if (maxSegments > 1) {
+            // Multiple segments - create separate TUs
+            for (let i = 0; i < maxSegments; i++) {
+              translationUnits.push({
+                sourceText: sourceSegments[i] || '',
+                targetText: targetSegments[i] || '',
+                keyPath: `${key}[seg:${i + 1}]`,
+                filePath: sourceFile.name
+              });
+            }
+          } else {
+            // Single segment or no segmentation needed
+            translationUnits.push({
+              sourceText,
+              targetText,
+              keyPath: key,
+              filePath: sourceFile.name
+            });
+          }
+        } else {
+          // No segmentation - create single TU
+          translationUnits.push({
+            sourceText,
+            targetText,
+            keyPath: key,
+            filePath: sourceFile.name
+          });
+        }
       });
       
     } catch (error) {
