@@ -22,9 +22,9 @@ export function segmentIntoSentences(text: string): string[] {
     });
   });
   
-  // Split on sentence-ending punctuation followed by space and capital letter, or end of string
-  // Handles: . ! ? : (when followed by space + capital or end of string)
-  const sentencePattern = /([.!?:]+)(?=\s+[A-ZÀ-ÖØ-Þ]|\s*$)/g;
+  // Split on sentence-ending punctuation: . ! ? :
+  // Matches punctuation followed by whitespace or end of string
+  const sentencePattern = /[.!?:]+(?=\s|$)/g;
   
   const segments: string[] = [];
   let lastIndex = 0;
