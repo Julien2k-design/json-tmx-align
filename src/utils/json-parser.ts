@@ -7,8 +7,17 @@ import { JsonFile, TranslationUnit, LanguagePair } from '@/types/json-tmx';
 export function segmentIntoSentences(text: string): string[] {
   if (!text || typeof text !== 'string') return [text];
   
+  // Normalize text: remove hidden characters and normalize whitespace
+  let normalizedText = text
+    .replace(/[\uFFFC\u200B\u200C\u200D\u2060\uFEFF]/g, '') // Remove object replacement & zero-width chars
+    .replace(/[\u00A0\u202F]/g, ' ') // Convert non-breaking spaces to regular spaces
+    .replace(/\s+/g, ' ') // Collapse multiple spaces
+    .trim();
+  
+  if (!normalizedText) return [text];
+  
   // Protect decimal numbers from being split (e.g., "1.2" should not split)
-  let processedText = text.replace(/(\d)\.(\d)/g, '$1__DECIMAL_DOT__$2');
+  let processedText = normalizedText.replace(/(\d)\.(\d)/g, '$1__DECIMAL_DOT__$2');
   
   // Common abbreviations that shouldn't trigger sentence breaks
   const abbreviations = ['Dr', 'Mr', 'Mrs', 'Ms', 'Prof', 'Sr', 'Jr', 'Inc', 'Ltd', 'Co', 'Corp', 'etc', 'i.e', 'e.g', 'vs', 'U.S', 'U.K', 'A.M', 'P.M'];
@@ -24,9 +33,12 @@ export function segmentIntoSentences(text: string): string[] {
     });
   });
   
-  // Handle bullets: insert sentinel before start-of-line bullets
-  // Only treat bullets as boundaries when they start a new line
-  processedText = processedText.replace(/(^|\r?\n)\s*([•*\-–—])\s+/g, '$1|||');
+  // Handle bullets AND numbered lists: insert sentinel before start-of-line markers
+  // Matches: "1.", "2.", etc. OR bullets (•, *, -, –, —)
+  processedText = processedText.replace(/(^|\r?\n)\s*(?:(\d+\.)|([•*\-–—]))\s+/g, '$1|||');
+  
+  // Special case: colon followed by numbered/bulleted list (handles "Question: 1. First item")
+  processedText = processedText.replace(/:\s+(?=\d+\.|[•*\-–—])/g, ':|||');
   
   // Conservative sentence pattern: only .!? and ellipsis, NOT colons
   // This prevents splitting on "Italian:" or similar constructs
