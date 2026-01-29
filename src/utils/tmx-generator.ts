@@ -75,15 +75,25 @@ function utf8ToBase64(str: string): string {
 }
 
 export function downloadTMX(tmxContent: string, filename: string = 'translation_memory.tmx'): void {
-  const blob = new Blob([tmxContent], { type: 'application/xml' });
+  const blob = new Blob([tmxContent], { type: 'application/xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   
+  // Create a temporary anchor element
   const link = document.createElement('a');
+  link.style.display = 'none';
   link.href = url;
   link.download = filename;
-  document.body.appendChild(link);
-  link.click();
   
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
+  // Append to body, click, and clean up
+  document.body.appendChild(link);
+  
+  // Use setTimeout to ensure the click happens after DOM update
+  setTimeout(() => {
+    link.click();
+    // Clean up after a short delay to ensure download starts
+    setTimeout(() => {
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }, 100);
+  }, 0);
 }
