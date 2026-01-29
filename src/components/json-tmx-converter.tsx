@@ -15,10 +15,9 @@ import { generateTMX, downloadTMX } from '@/utils/tmx-generator';
 import { useToast } from '@/hooks/use-toast';
 
 export function JsonTmxConverter() {
-  const [allFiles, setAllFiles] = useState<JsonFile[]>([]);
+  const [sourceFiles, setSourceFiles] = useState<JsonFile[]>([]);
+  const [targetFiles, setTargetFiles] = useState<JsonFile[]>([]);
   const [tmxExports, setTmxExports] = useState<TMXExport[]>([]);
-  const [detectedLanguages, setDetectedLanguages] = useState<string[]>([]);
-  const [sourceLanguage, setSourceLanguage] = useState<string>('en-GB');
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatusType>({
     isProcessing: false,
     progress: 0,
@@ -28,26 +27,20 @@ export function JsonTmxConverter() {
   
   const { toast } = useToast();
 
-  const handleFilesChange = useCallback((files: JsonFile[]) => {
-    setAllFiles(files);
-    
-    // Detect languages from uploaded files using consistent detection logic
-    const languages = Array.from(new Set(
-      files.map(file => {
-        const { lang } = detectLanguageForFile(file);
-        return lang;
-      }).filter(Boolean)
-    )) as string[];
-    
-    setDetectedLanguages(languages);
-    console.debug('[handleFilesChange] Detected languages:', languages);
-  }, []);
+  // Derive detected languages from both source and target files
+  const detectedSourceLang = sourceFiles.length > 0 
+    ? detectLanguageForFile(sourceFiles[0]).lang 
+    : null;
+  
+  const detectedTargetLanguages = Array.from(new Set(
+    targetFiles.map(file => detectLanguageForFile(file).lang).filter(Boolean)
+  )) as string[];
 
   const processFiles = useCallback(async () => {
-    if (allFiles.length === 0) {
+    if (sourceFiles.length === 0 || targetFiles.length === 0) {
       toast({
         title: "Missing Files",
-        description: "Please upload JSON files to process.",
+        description: "Please upload both source and target JSON files.",
         variant: "destructive",
       });
       return;
@@ -56,16 +49,27 @@ export function JsonTmxConverter() {
     setProcessingStatus({
       isProcessing: true,
       progress: 0,
-      message: "Detecting language pairs...",
+      message: "Matching files and creating pairs...",
     });
 
     try {
-      const languagePairs = findLanguagePairs(allFiles, sourceLanguage);
+      // Get source language from first source file
+      const sourceLang = detectLanguageForFile(sourceFiles[0]).lang || 'source';
       
-      if (languagePairs.length === 0) {
+      // Group target files by language
+      const targetsByLang = new Map<string, JsonFile[]>();
+      targetFiles.forEach(file => {
+        const lang = detectLanguageForFile(file).lang || 'unknown';
+        if (!targetsByLang.has(lang)) {
+          targetsByLang.set(lang, []);
+        }
+        targetsByLang.get(lang)!.push(file);
+      });
+
+      if (targetsByLang.size === 0) {
         toast({
-          title: "No Language Pairs Found",
-          description: `Could not detect "${sourceLanguage}" source files and target language files. Make sure your files contain the selected source language.`,
+          title: "No Target Languages Found",
+          description: "Could not detect languages in target files.",
           variant: "destructive",
         });
         setProcessingStatus({ isProcessing: false, progress: 0 });
@@ -73,6 +77,18 @@ export function JsonTmxConverter() {
       }
 
       const exports: TMXExport[] = [];
+
+      const languagePairs: { sourceLanguage: string; targetLanguage: string; sourceFiles: JsonFile[]; targetFiles: JsonFile[] }[] = [];
+      
+      targetsByLang.forEach((langTargetFiles, targetLang) => {
+        languagePairs.push({
+          sourceLanguage: sourceLang,
+          targetLanguage: targetLang,
+          sourceFiles: sourceFiles,
+          targetFiles: langTargetFiles
+        });
+      });
+
       const totalPairs = languagePairs.length;
 
       for (let i = 0; i < languagePairs.length; i++) {
@@ -122,7 +138,7 @@ export function JsonTmxConverter() {
         variant: "destructive",
       });
     }
-  }, [allFiles, toast]);
+  }, [sourceFiles, targetFiles, toast]);
 
   const downloadTmxFile = useCallback((tmxExport: TMXExport) => {
     if (tmxExport.translationUnits.length === 0) {
@@ -201,9 +217,9 @@ export function JsonTmxConverter() {
   }, [tmxExports, downloadTmxFile, combinedMode, toast]);
 
   const reset = useCallback(() => {
-    setAllFiles([]);
+    setSourceFiles([]);
+    setTargetFiles([]);
     setTmxExports([]);
-    setDetectedLanguages([]);
     setSelectedPreview(null);
     setProcessingStatus({
       isProcessing: false,
@@ -230,101 +246,121 @@ export function JsonTmxConverter() {
         </p>
       </div>
 
-      {/* Source Language Selection */}
+      {/* Source Files Upload */}
       <Card className="p-6 bg-gradient-card shadow-card">
-        <h2 className="text-xl font-semibold mb-4 text-foreground">1. Select Source Language</h2>
+        <h2 className="text-xl font-semibold mb-4 text-foreground">1. Upload Source Files</h2>
         <p className="text-muted-foreground mb-4">
-          Choose the language that should be treated as the source for translation. Files matching this language will be used as the reference.
+          Drop your source language JSON files here. These will be used as the reference for translation.
         </p>
-        <div className="flex flex-wrap gap-2">
-          {['en-GB', 'en-US', 'en', 'fr-FR', 'de-DE', 'es-ES', 'it-IT', 'pt-PT', 'nl-NL', 'ja-JP', 'zh-CN', 'ko-KR'].map(lang => (
-            <Button
-              key={lang}
-              variant={sourceLanguage === lang ? 'default' : 'outline'}
-              size="sm"
-              onClick={() => setSourceLanguage(lang)}
-              className="min-w-[70px]"
-            >
-              {lang}
-            </Button>
-          ))}
-        </div>
-        {detectedLanguages.length > 0 && !detectedLanguages.some(l => l === sourceLanguage || l.startsWith(sourceLanguage.split('-')[0])) && (
-          <p className="text-sm text-amber-600 mt-2">
-            ⚠️ Selected source language "{sourceLanguage}" not found in uploaded files
-          </p>
+        <FileUpload
+          title="Source JSON Files"
+          description="Upload source language files (e.g., English originals)"
+          onFilesChange={setSourceFiles}
+          files={sourceFiles}
+        />
+        {detectedSourceLang && (
+          <div className="mt-3 p-2 bg-secondary rounded-lg inline-block">
+            <span className="text-sm text-muted-foreground">Detected source language: </span>
+            <span className="px-2 py-1 bg-primary text-primary-foreground rounded text-sm font-medium">
+              {detectedSourceLang}
+            </span>
+          </div>
         )}
       </Card>
 
-      {/* File Upload */}
+      {/* Target Files Upload */}
       <Card className="p-6 bg-gradient-card shadow-card">
-        <h2 className="text-xl font-semibold mb-4 text-foreground">2. Upload JSON Files</h2>
+        <h2 className="text-xl font-semibold mb-4 text-foreground">2. Upload Target Files</h2>
         <p className="text-muted-foreground mb-4">
-          Upload all your JSON files at once. The tool will detect languages from filenames and match "{sourceLanguage}" source files with their target language counterparts.
+          Drop your translated JSON files here. The tool will match them with source files by base name.
         </p>
         <FileUpload
-          title="All JSON Files"
-          description="Upload all source and target JSON files together"
-          onFilesChange={handleFilesChange}
-          files={allFiles}
+          title="Target JSON Files"
+          description="Upload translated files (e.g., French, German, Spanish translations)"
+          onFilesChange={setTargetFiles}
+          files={targetFiles}
         />
-        
-        {detectedLanguages.length > 0 && (
-          <div className="mt-4 p-3 bg-secondary rounded-lg">
-            <h3 className="font-medium text-foreground mb-2">Detected Languages:</h3>
-            <div className="flex flex-wrap gap-2">
-              {detectedLanguages.map(lang => (
-                <span key={lang} className="px-3 py-1 bg-primary text-primary-foreground rounded-full text-sm">
+        {detectedTargetLanguages.length > 0 && (
+          <div className="mt-3 p-2 bg-secondary rounded-lg">
+            <span className="text-sm text-muted-foreground">Detected target languages: </span>
+            <div className="flex flex-wrap gap-2 mt-2">
+              {detectedTargetLanguages.map(lang => (
+                <span key={lang} className="px-2 py-1 bg-primary text-primary-foreground rounded text-sm">
                   {lang}
                 </span>
               ))}
             </div>
           </div>
         )}
-
-        {allFiles.length > 0 && (
-          <div className="mt-4">
-            <h3 className="font-medium text-foreground mb-2">Detection Summary:</h3>
-            <ScrollArea className="h-[200px] rounded-md border">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>File</TableHead>
-                    <TableHead>Language</TableHead>
-                    <TableHead>Origin</TableHead>
-                    <TableHead>Base Name</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {allFiles.map((file, index) => {
-                    const { lang, origin } = detectLanguageForFile(file);
-                    const base = getBaseName(file.path || file.name);
-                    return (
-                      <TableRow key={index}>
-                        <TableCell className="font-mono text-xs">{file.path || file.name}</TableCell>
-                        <TableCell>
-                          <span className="px-2 py-1 bg-primary/10 text-primary rounded text-xs">
-                            {lang || 'unknown'}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">{origin || 'N/A'}</TableCell>
-                        <TableCell className="font-mono text-xs">{base}</TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
-            </ScrollArea>
-          </div>
-        )}
       </Card>
+
+      {/* File Summary */}
+      {(sourceFiles.length > 0 || targetFiles.length > 0) && (
+        <Card className="p-6 bg-gradient-card shadow-card">
+          <h2 className="text-xl font-semibold mb-4 text-foreground">File Summary</h2>
+          <ScrollArea className="h-[200px] rounded-md border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Type</TableHead>
+                  <TableHead>File</TableHead>
+                  <TableHead>Language</TableHead>
+                  <TableHead>Base Name</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {sourceFiles.map((file, index) => {
+                  const { lang } = detectLanguageForFile(file);
+                  const base = getBaseName(file.path || file.name);
+                  return (
+                    <TableRow key={`source-${index}`}>
+                      <TableCell>
+                        <span className="px-2 py-1 bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 rounded text-xs font-medium">
+                          Source
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{file.path || file.name}</TableCell>
+                      <TableCell>
+                        <span className="px-2 py-1 bg-primary/10 text-primary rounded text-xs">
+                          {lang || 'unknown'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{base}</TableCell>
+                    </TableRow>
+                  );
+                })}
+                {targetFiles.map((file, index) => {
+                  const { lang } = detectLanguageForFile(file);
+                  const base = getBaseName(file.path || file.name);
+                  return (
+                    <TableRow key={`target-${index}`}>
+                      <TableCell>
+                        <span className="px-2 py-1 bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 rounded text-xs font-medium">
+                          Target
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{file.path || file.name}</TableCell>
+                      <TableCell>
+                        <span className="px-2 py-1 bg-primary/10 text-primary rounded text-xs">
+                          {lang || 'unknown'}
+                        </span>
+                      </TableCell>
+                      <TableCell className="font-mono text-xs">{base}</TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </ScrollArea>
+        </Card>
+      )}
 
       {/* Processing Actions */}
       <div className="flex flex-col items-center space-y-4">
         <div className="flex justify-center space-x-4">
           <Button
             onClick={processFiles}
-            disabled={allFiles.length === 0 || processingStatus.isProcessing}
+            disabled={sourceFiles.length === 0 || targetFiles.length === 0 || processingStatus.isProcessing}
             variant="hero"
             size="lg"
           >
@@ -336,7 +372,7 @@ export function JsonTmxConverter() {
             ) : (
               <>
                 <Languages className="w-4 h-4" />
-                Auto-Detect & Process
+                Process & Generate TMX
               </>
             )}
           </Button>
