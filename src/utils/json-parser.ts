@@ -237,12 +237,19 @@ export function groupFilesByLanguage(files: JsonFile[]): Map<string, JsonFile[]>
   return languageGroups;
 }
 
-export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
+export function findLanguagePairs(files: JsonFile[], specifiedSourceLang?: string): LanguagePair[] {
   const pairs: LanguagePair[] = [];
-  // Prefer specific English variants, but allow plain 'en' fallback
-  const sourceLangPriority = ['en-GB', 'en-US', 'en'];
+  
+  // Build source language priority based on specified language
+  const baseSourceLang = specifiedSourceLang?.split('-')[0] || 'en';
+  const sourceLangPriority = specifiedSourceLang 
+    ? [specifiedSourceLang, `${baseSourceLang}-GB`, `${baseSourceLang}-US`, baseSourceLang]
+    : ['en-GB', 'en-US', 'en'];
+  
+  // Remove duplicates while preserving order
+  const uniqueSourcePriority = [...new Set(sourceLangPriority)];
 
-  console.debug(`[findLanguagePairs] Processing ${files.length} files`);
+  console.debug(`[findLanguagePairs] Processing ${files.length} files with source priority:`, uniqueSourcePriority);
 
   // Group files by base name (normalized from path or name)
   const fileGroups = new Map<string, JsonFile[]>();
@@ -260,14 +267,14 @@ export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
   fileGroups.forEach((group, baseName) => {
     console.debug(`[findLanguagePairs] Processing group "${baseName}" with ${group.length} files`);
 
-    // Pick the best English source in priority order
-    const englishCandidates = group
+    // Pick the best source file based on priority order
+    const sourceCandidates = group
       .map((f) => ({ f, det: detectLanguageForFile(f) }))
-      .filter((x) => x.det.lang && x.det.lang.startsWith('en'));
+      .filter((x) => x.det.lang && x.det.lang.startsWith(baseSourceLang));
 
     let sourceFile: JsonFile | null = null;
-    for (const pref of sourceLangPriority) {
-      const found = englishCandidates.find((x) => x.det.lang === pref);
+    for (const pref of uniqueSourcePriority) {
+      const found = sourceCandidates.find((x) => x.det.lang === pref);
       if (found) {
         sourceFile = found.f;
         console.debug(`[findLanguagePairs] Selected source ${found.f.name} (${found.det.lang}, origin=${found.det.origin})`);
@@ -278,7 +285,8 @@ export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
     const targetFiles: JsonFile[] = [];
     group.forEach(file => {
       const { lang: langCode, origin } = detectLanguageForFile(file);
-      if (file !== sourceFile && langCode && !langCode.startsWith('en')) {
+      // Target files are those that don't match the source language base
+      if (file !== sourceFile && langCode && !langCode.startsWith(baseSourceLang)) {
         targetFiles.push(file);
         console.debug(`[findLanguagePairs] Added target: ${file.name} (${langCode}, origin=${origin})`);
       }
@@ -300,7 +308,7 @@ export function findLanguagePairs(files: JsonFile[]): LanguagePair[] {
       });
     } else {
       const reasons = !sourceFile
-        ? `no English source found among: ${group.map(g => `${g.name}(${detectLanguageForFile(g).lang || 'n/a'})`).join(', ')}`
+        ? `no ${baseSourceLang} source found among: ${group.map(g => `${g.name}(${detectLanguageForFile(g).lang || 'n/a'})`).join(', ')}`
         : `have source but ${targetFiles.length} targets`;
       console.debug(`[findLanguagePairs] Skipping group "${baseName}": ${reasons}`);
     }

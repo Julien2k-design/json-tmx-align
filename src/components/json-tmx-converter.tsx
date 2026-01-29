@@ -18,6 +18,7 @@ export function JsonTmxConverter() {
   const [allFiles, setAllFiles] = useState<JsonFile[]>([]);
   const [tmxExports, setTmxExports] = useState<TMXExport[]>([]);
   const [detectedLanguages, setDetectedLanguages] = useState<string[]>([]);
+  const [sourceLanguage, setSourceLanguage] = useState<string>('en-GB');
   const [processingStatus, setProcessingStatus] = useState<ProcessingStatusType>({
     isProcessing: false,
     progress: 0,
@@ -59,7 +60,7 @@ export function JsonTmxConverter() {
     });
 
     try {
-      const languagePairs = findLanguagePairs(allFiles);
+      const languagePairs = findLanguagePairs(allFiles, sourceLanguage);
       
       if (languagePairs.length === 0) {
         toast({
@@ -229,12 +230,37 @@ export function JsonTmxConverter() {
         </p>
       </div>
 
+      {/* Source Language Selection */}
+      <Card className="p-6 bg-gradient-card shadow-card">
+        <h2 className="text-xl font-semibold mb-4 text-foreground">1. Select Source Language</h2>
+        <p className="text-muted-foreground mb-4">
+          Choose the language that should be treated as the source for translation. Files matching this language will be used as the reference.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {['en-GB', 'en-US', 'en', 'fr-FR', 'de-DE', 'es-ES', 'it-IT', 'pt-PT', 'nl-NL', 'ja-JP', 'zh-CN', 'ko-KR'].map(lang => (
+            <Button
+              key={lang}
+              variant={sourceLanguage === lang ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setSourceLanguage(lang)}
+              className="min-w-[70px]"
+            >
+              {lang}
+            </Button>
+          ))}
+        </div>
+        {detectedLanguages.length > 0 && !detectedLanguages.some(l => l === sourceLanguage || l.startsWith(sourceLanguage.split('-')[0])) && (
+          <p className="text-sm text-amber-600 mt-2">
+            ⚠️ Selected source language "{sourceLanguage}" not found in uploaded files
+          </p>
+        )}
+      </Card>
+
       {/* File Upload */}
       <Card className="p-6 bg-gradient-card shadow-card">
-        <h2 className="text-xl font-semibold mb-4 text-foreground">Upload JSON Files</h2>
+        <h2 className="text-xl font-semibold mb-4 text-foreground">2. Upload JSON Files</h2>
         <p className="text-muted-foreground mb-4">
-          Upload all your JSON files at once. The tool will automatically detect languages from filenames (e.g., menu_en-GB.json, menu_es-ES.json) 
-          and match source files with their target language counterparts.
+          Upload all your JSON files at once. The tool will detect languages from filenames and match "{sourceLanguage}" source files with their target language counterparts.
         </p>
         <FileUpload
           title="All JSON Files"
