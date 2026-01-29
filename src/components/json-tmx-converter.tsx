@@ -65,7 +65,7 @@ export function JsonTmxConverter() {
       if (languagePairs.length === 0) {
         toast({
           title: "No Language Pairs Found",
-          description: "Could not detect English source files and target language files.",
+          description: `Could not detect "${sourceLanguage}" source files and target language files. Make sure your files contain the selected source language.`,
           variant: "destructive",
         });
         setProcessingStatus({ isProcessing: false, progress: 0 });
