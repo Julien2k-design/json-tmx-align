@@ -388,34 +388,31 @@ export function parseJsonFiles(
         if (enableSegmentation && sourceText.length > 0) {
           const sourceSegments = segmentIntoSentences(sourceText);
           const targetSegments = targetText ? segmentIntoSentences(targetText) : [];
-          
-          // Only segment if both source and target are non-empty AND segment counts match
-          if (targetText && sourceSegments.length === targetSegments.length && sourceSegments.length > 1) {
-            // Counts match - create per-segment TUs
+          const hasMeaningfulSegmentation = sourceSegments.length > 1 || targetSegments.length > 1;
+
+          if (hasMeaningfulSegmentation) {
+            const alignedTargetSegments = alignTargetSegmentsToSource(sourceSegments, targetSegments);
+
+            if (targetText && sourceSegments.length !== targetSegments.length) {
+              console.warn(
+                `Segmentation mismatch for key "${key}" in ${sourceFile.name} ` +
+                `(source=${sourceSegments.length}, target=${targetSegments.length}). ` +
+                `Using smart alignment to keep sentence-level segments.`
+              );
+            }
+
             for (let i = 0; i < sourceSegments.length; i++) {
               translationUnits.push({
                 sourceText: sourceSegments[i],
-                targetText: targetSegments[i],
+                targetText: alignedTargetSegments[i] || '',
                 keyPath: key,
                 filePath: sourceFile.name,
                 segmentIndex: i + 1,
                 totalSegments: sourceSegments.length
               });
             }
-          } else if (targetText && sourceSegments.length !== targetSegments.length && sourceSegments.length > 1) {
-            // Mismatch - fall back to unsegmented
-            console.warn(
-              `Segmentation mismatch for key "${key}" in ${sourceFile.name} ` +
-              `(source=${sourceSegments.length}, target=${targetSegments.length}). Fallback to unsegmented.`
-            );
-            translationUnits.push({
-              sourceText,
-              targetText,
-              keyPath: key,
-              filePath: sourceFile.name
-            });
           } else {
-            // Single segment or no target - create single TU
+            // Single segment - create one TU
             translationUnits.push({
               sourceText,
               targetText,
@@ -442,6 +439,156 @@ export function parseJsonFiles(
   return { translationUnits, errors, missingKeys };
 }
 
+function isTagSegment(segment: string): boolean {
+  return /^(?:\{\d+\})+$/.test(segment.trim().replace(/\s+/g, ''));
+}
+
+function normalizeTagSegment(segment: string): string {
+  return segment.replace(/\s+/g, '');
+}
+
+function findMatchingTagIndex(segments: string[], normalizedTag: string, startIndex: number): number {
+  for (let i = startIndex; i < segments.length; i++) {
+    if (isTagSegment(segments[i]) && normalizeTagSegment(segments[i]) === normalizedTag) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function findPreviousTextSourceIndex(sourceSegments: string[], startIndex: number): number {
+  for (let i = startIndex; i >= 0; i--) {
+    if (!isTagSegment(sourceSegments[i])) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+function alignTextBlock(
+  sourceIndices: number[],
+  targetTextSegments: string[],
+  alignedTargetBySource: string[]
+): void {
+  if (sourceIndices.length === 0) return;
+
+  if (targetTextSegments.length === 0) {
+    sourceIndices.forEach((sourceIdx) => {
+      alignedTargetBySource[sourceIdx] = '';
+    });
+    return;
+  }
+
+  if (targetTextSegments.length <= sourceIndices.length) {
+    sourceIndices.forEach((sourceIdx, i) => {
+      alignedTargetBySource[sourceIdx] = targetTextSegments[i] ?? '';
+    });
+    return;
+  }
+
+  sourceIndices.slice(0, -1).forEach((sourceIdx, i) => {
+    alignedTargetBySource[sourceIdx] = targetTextSegments[i] ?? '';
+  });
+
+  const lastSourceIdx = sourceIndices[sourceIndices.length - 1];
+  alignedTargetBySource[lastSourceIdx] = targetTextSegments
+    .slice(sourceIndices.length - 1)
+    .join(' ')
+    .trim();
+}
+
+function alignTargetSegmentsToSource(sourceSegments: string[], targetSegments: string[]): string[] {
+  if (sourceSegments.length === 0) return [];
+  if (targetSegments.length === 0) return sourceSegments.map(() => '');
+
+  const alignedTargetBySource = sourceSegments.map(() => '');
+  let sourceIndex = 0;
+  let targetIndex = 0;
+
+  while (sourceIndex < sourceSegments.length) {
+    if (isTagSegment(sourceSegments[sourceIndex])) {
+      const sourceTag = normalizeTagSegment(sourceSegments[sourceIndex]);
+      const matchedTargetTagIndex = findMatchingTagIndex(targetSegments, sourceTag, targetIndex);
+
+      if (matchedTargetTagIndex !== -1) {
+        const unexpectedTextBeforeTag = targetSegments
+          .slice(targetIndex, matchedTargetTagIndex)
+          .filter((segment) => !isTagSegment(segment) && segment.trim().length > 0)
+          .join(' ')
+          .trim();
+
+        if (unexpectedTextBeforeTag) {
+          const previousTextSourceIndex = findPreviousTextSourceIndex(sourceSegments, sourceIndex - 1);
+          if (previousTextSourceIndex !== -1) {
+            alignedTargetBySource[previousTextSourceIndex] = [
+              alignedTargetBySource[previousTextSourceIndex],
+              unexpectedTextBeforeTag
+            ]
+              .filter(Boolean)
+              .join(' ')
+              .trim();
+          }
+        }
+
+        alignedTargetBySource[sourceIndex] = targetSegments[matchedTargetTagIndex];
+        targetIndex = matchedTargetTagIndex + 1;
+      }
+
+      sourceIndex++;
+      continue;
+    }
+
+    // Collect contiguous source text segments until the next source tag
+    const sourceTextIndices: number[] = [];
+    while (sourceIndex < sourceSegments.length && !isTagSegment(sourceSegments[sourceIndex])) {
+      sourceTextIndices.push(sourceIndex);
+      sourceIndex++;
+    }
+
+    const nextSourceTag = sourceIndex < sourceSegments.length
+      ? normalizeTagSegment(sourceSegments[sourceIndex])
+      : null;
+
+    let targetBlockEnd = targetSegments.length;
+    if (nextSourceTag) {
+      const nextTagIndex = findMatchingTagIndex(targetSegments, nextSourceTag, targetIndex);
+      if (nextTagIndex !== -1) {
+        targetBlockEnd = nextTagIndex;
+      }
+    }
+
+    const targetTextSegments = targetSegments
+      .slice(targetIndex, targetBlockEnd)
+      .filter((segment) => !isTagSegment(segment) && segment.trim().length > 0);
+
+    alignTextBlock(sourceTextIndices, targetTextSegments, alignedTargetBySource);
+    targetIndex = targetBlockEnd;
+  }
+
+  // Attach any trailing unmatched target text to the last source text segment
+  if (targetIndex < targetSegments.length) {
+    const trailingText = targetSegments
+      .slice(targetIndex)
+      .filter((segment) => !isTagSegment(segment) && segment.trim().length > 0)
+      .join(' ')
+      .trim();
+
+    if (trailingText) {
+      const lastTextSourceIndex = findPreviousTextSourceIndex(sourceSegments, sourceSegments.length - 1);
+      if (lastTextSourceIndex !== -1) {
+        alignedTargetBySource[lastTextSourceIndex] = [
+          alignedTargetBySource[lastTextSourceIndex],
+          trailingText
+        ]
+          .filter(Boolean)
+          .join(' ')
+          .trim();
+      }
+    }
+  }
+
+  return alignedTargetBySource;
+}
 
 function extractTranslationUnits(
   source: any,
