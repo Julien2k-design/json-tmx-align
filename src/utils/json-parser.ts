@@ -16,6 +16,28 @@ export function segmentIntoSentences(text: string): string[] {
   
   if (!normalizedText) return [text];
   
+  // Split on {N} placeholder tag groups first - they become their own segments
+  // e.g., "sentence.{10}{9}Next sentence" → ["sentence.", "{10}{9}", "Next sentence"]
+  const tagSplitParts = normalizedText.split(/((?:\{\d+\})+)/g).filter(p => p.length > 0);
+  
+  // If we have tag groups, process each non-tag part for sentence splitting
+  if (tagSplitParts.length > 1) {
+    const allSegments: string[] = [];
+    for (const part of tagSplitParts) {
+      const trimmed = part.trim();
+      if (!trimmed) continue;
+      // If it's a tag group like {10}{9}, keep as-is
+      if (/^(?:\{\d+\})+$/.test(trimmed)) {
+        allSegments.push(trimmed);
+      } else {
+        // Recursively segment non-tag text
+        const subSegments = segmentIntoSentences(trimmed);
+        allSegments.push(...subSegments);
+      }
+    }
+    return allSegments.length > 0 ? allSegments : [text];
+  }
+  
   // Protect decimal numbers from being split (e.g., "1.2" should not split)
   let processedText = normalizedText.replace(/(\d)\.(\d)/g, '$1__DECIMAL_DOT__$2');
   
@@ -42,7 +64,7 @@ export function segmentIntoSentences(text: string): string[] {
   
   // Conservative sentence pattern: only .!? and ellipsis, NOT colons
   // This prevents splitting on "Italian:" or similar constructs
-  const sentencePattern = /(?:\u2026|\.{3}|[.!?])(?=\s|$|<|["')\]])/g;
+  const sentencePattern = /(?:\u2026|\.{3}|[.!?])(?=\s|$|<|["')\]\{])/g;
   
   // Split on the bullet sentinel and sentence endings
   const segments: string[] = [];
