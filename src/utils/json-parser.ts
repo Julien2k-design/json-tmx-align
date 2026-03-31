@@ -60,11 +60,11 @@ export function segmentIntoSentences(text: string): string[] {
   processedText = processedText.replace(/(^|\r?\n)\s*(?:(\d+\.)|([•*\-–—]))\s+/g, '$1|||');
   
   // Special case: colon followed by numbered/bulleted list (handles "Question: 1. First item")
-  processedText = processedText.replace(/:\s+(?=\d+\.|[•*\-–—])/g, ':|||');
+  processedText = processedText.replace(/:\s*(?=\d+\.|[•*\-–—])/g, ':|||');
   
   // Conservative sentence pattern: only .!? and ellipsis, NOT colons
-  // This prevents splitting on "Italian:" or similar constructs
-  const sentencePattern = /(?:\u2026|\.{3}|[.!?])(?=\s|$|<|["')\]\{])/g;
+  // Also splits when the next sentence starts immediately (no whitespace) with uppercase/number
+  const sentencePattern = /(?:\u2026|\.{3}|[.!?])(?=\s|$|<|["')\]\{]|\p{Lu}|\d)/gu;
   
   // Split on the bullet sentinel and sentence endings
   const segments: string[] = [];
