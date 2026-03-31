@@ -60,11 +60,11 @@ export function segmentIntoSentences(text: string): string[] {
   processedText = processedText.replace(/(^|\r?\n)\s*(?:(\d+\.)|([•*\-–—]))\s+/g, '$1|||');
   
   // Special case: colon followed by numbered/bulleted list (handles "Question: 1. First item")
-  processedText = processedText.replace(/:\s+(?=\d+\.|[•*\-–—])/g, ':|||');
+  processedText = processedText.replace(/:\s*(?=\d+\.|[•*\-–—])/g, ':|||');
   
   // Conservative sentence pattern: only .!? and ellipsis, NOT colons
-  // This prevents splitting on "Italian:" or similar constructs
-  const sentencePattern = /(?:\u2026|\.{3}|[.!?])(?=\s|$|<|["')\]\{])/g;
+  // Also splits when the next sentence starts immediately (no whitespace) with uppercase/number
+  const sentencePattern = /(?:\u2026|\.{3}|[.!?])(?=\s|$|<|["')\]\{]|\p{Lu}|\d)/gu;
   
   // Split on the bullet sentinel and sentence endings
   const segments: string[] = [];
@@ -502,6 +502,29 @@ function alignTargetSegmentsToSource(sourceSegments: string[], targetSegments: s
   if (targetSegments.length === 0) return sourceSegments.map(() => '');
 
   const alignedTargetBySource = sourceSegments.map(() => '');
+  const sourceTextIndices = sourceSegments.reduce<number[]>((acc, segment, index) => {
+    if (!isTagSegment(segment)) acc.push(index);
+    return acc;
+  }, []);
+  const targetTextSegments = targetSegments.filter((segment) => !isTagSegment(segment) && segment.trim().length > 0);
+
+  const sourceHasTags = sourceSegments.some(isTagSegment);
+  const sourceTagSet = new Set(
+    sourceSegments
+      .filter(isTagSegment)
+      .map(normalizeTagSegment)
+  );
+  const targetHasMatchingTags = targetSegments.some(
+    (segment) => isTagSegment(segment) && sourceTagSet.has(normalizeTagSegment(segment))
+  );
+
+  // If source has placeholders but target has none (or none that match),
+  // align by sentence order and keep placeholder rows empty in target.
+  if (sourceHasTags && !targetHasMatchingTags) {
+    alignTextBlock(sourceTextIndices, targetTextSegments, alignedTargetBySource);
+    return alignedTargetBySource;
+  }
+
   let sourceIndex = 0;
   let targetIndex = 0;
 
@@ -539,9 +562,9 @@ function alignTargetSegmentsToSource(sourceSegments: string[], targetSegments: s
     }
 
     // Collect contiguous source text segments until the next source tag
-    const sourceTextIndices: number[] = [];
+    const sourceTextIndicesBlock: number[] = [];
     while (sourceIndex < sourceSegments.length && !isTagSegment(sourceSegments[sourceIndex])) {
-      sourceTextIndices.push(sourceIndex);
+      sourceTextIndicesBlock.push(sourceIndex);
       sourceIndex++;
     }
 
@@ -554,14 +577,29 @@ function alignTargetSegmentsToSource(sourceSegments: string[], targetSegments: s
       const nextTagIndex = findMatchingTagIndex(targetSegments, nextSourceTag, targetIndex);
       if (nextTagIndex !== -1) {
         targetBlockEnd = nextTagIndex;
+      } else {
+        // Lost tag anchoring: align all remaining text segments by order.
+        const remainingSourceTextIndices = [...sourceTextIndicesBlock];
+        for (let i = sourceIndex; i < sourceSegments.length; i++) {
+          if (!isTagSegment(sourceSegments[i])) {
+            remainingSourceTextIndices.push(i);
+          }
+        }
+
+        const remainingTargetText = targetSegments
+          .slice(targetIndex)
+          .filter((segment) => !isTagSegment(segment) && segment.trim().length > 0);
+
+        alignTextBlock(remainingSourceTextIndices, remainingTargetText, alignedTargetBySource);
+        return alignedTargetBySource;
       }
     }
 
-    const targetTextSegments = targetSegments
+    const targetTextSegmentsBlock = targetSegments
       .slice(targetIndex, targetBlockEnd)
       .filter((segment) => !isTagSegment(segment) && segment.trim().length > 0);
 
-    alignTextBlock(sourceTextIndices, targetTextSegments, alignedTargetBySource);
+    alignTextBlock(sourceTextIndicesBlock, targetTextSegmentsBlock, alignedTargetBySource);
     targetIndex = targetBlockEnd;
   }
 
