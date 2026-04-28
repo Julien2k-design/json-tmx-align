@@ -172,6 +172,9 @@ export function detectLanguageForFile(file: JsonFile): { lang: string | null; or
 }
 
 export function detectLanguageFromFilename(filename: string): string | null {
+  const languageFromName = detectLanguageNameFromText(filename);
+  if (languageFromName) return languageFromName;
+
   // Try suffix near the extension: base_en-GB.json | base.en_US.json | base-fr.json
   const suffixRe = /[._-]([a-z]{2})(?:[-_]?([a-z]{2}))?\.(json|js|csv)$/i;
   let m = filename.match(suffixRe);
@@ -185,6 +188,35 @@ export function detectLanguageFromFilename(filename: string): string | null {
     const region = m[2];
     return region ? `${lang}-${region.toUpperCase()}` : lang;
   }
+  return null;
+}
+
+const LANGUAGE_NAME_TO_CODE: Record<string, string> = {
+  english: 'en', spanish: 'es', castilian: 'es', french: 'fr', german: 'de', italian: 'it', portuguese: 'pt',
+  brazilianportuguese: 'pt-BR', dutch: 'nl', swedish: 'sv', norwegian: 'no', danish: 'da', finnish: 'fi',
+  polish: 'pl', czech: 'cs', slovak: 'sk', hungarian: 'hu', romanian: 'ro', bulgarian: 'bg', croatian: 'hr',
+  serbian: 'sr', slovenian: 'sl', greek: 'el', turkish: 'tr', russian: 'ru', ukrainian: 'uk', arabic: 'ar',
+  hebrew: 'he', hindi: 'hi', chinese: 'zh', mandarin: 'zh', japanese: 'ja', korean: 'ko', thai: 'th',
+  vietnamese: 'vi', indonesian: 'id', malay: 'ms'
+};
+
+function detectLanguageNameFromText(text: string): string | null {
+  const withoutExt = text.replace(/\.(json|js|csv)$/i, '');
+  const tokens = withoutExt
+    .split(/[\\/._\-\s()\[\]]+/)
+    .map((token) => token.toLowerCase().replace(/[^a-z]/g, ''))
+    .filter(Boolean);
+
+  for (let i = tokens.length - 1; i >= 0; i--) {
+    const single = LANGUAGE_NAME_TO_CODE[tokens[i]];
+    if (single) return single;
+    if (i > 0) {
+      const compound = `${tokens[i - 1]}${tokens[i]}`;
+      const compoundCode = LANGUAGE_NAME_TO_CODE[compound];
+      if (compoundCode) return compoundCode;
+    }
+  }
+
   return null;
 }
 
@@ -232,7 +264,7 @@ export function flattenJSON(obj: any, parentKey: string = ''): Record<string, st
 export function getBaseName(pathOrName: string): string {
   // Normalize separators and remove language folders
   const parts = pathOrName.split(/[\\/]/).filter(Boolean);
-  const isLangSeg = (s: string) => /^([a-z]{2})(?:[-_][A-Za-z]{2})?$/.test(s);
+  const isLangSeg = (s: string) => /^([a-z]{2})(?:[-_][A-Za-z]{2})?$/.test(s) || !!detectLanguageNameFromText(s);
   const filtered = parts.filter((seg) => !isLangSeg(seg));
   const last = (filtered.length ? filtered : parts).slice(-1)[0] || '';
   // Remove extension
@@ -240,7 +272,19 @@ export function getBaseName(pathOrName: string): string {
   // Remove leading or trailing language codes in the filename
   base = base.replace(/^([a-z]{2})(?:[-_][A-Za-z]{2})?[._-]+/i, '');
   base = base.replace(/[._-]+([a-z]{2})(?:[-_][A-Za-z]{2})?$/i, '');
+  base = stripLanguageNameFromBase(base);
   return base;
+}
+
+function stripLanguageNameFromBase(base: string): string {
+  const languageNames = Object.keys(LANGUAGE_NAME_TO_CODE).sort((a, b) => b.length - a.length);
+  for (const name of languageNames) {
+    const spaced = name.replace(/(brazilian)(portuguese)/, '$1 $2');
+    const pattern = spaced.replace(/\s+/g, '[._\\-\\s]+');
+    base = base.replace(new RegExp(`(^|[._\\-\\s]+)${pattern}$`, 'i'), '');
+    base = base.replace(new RegExp(`^${pattern}([._\\-\\s]+|$)`, 'i'), '');
+  }
+  return base.replace(/[._\-\s]+$/g, '').replace(/^[._\-\s]+/g, '');
 }
 
 export function groupFilesByLanguage(files: JsonFile[]): Map<string, JsonFile[]> {
