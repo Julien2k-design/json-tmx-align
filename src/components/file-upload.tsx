@@ -12,7 +12,66 @@ interface FileUploadProps {
   accept?: string;
 }
 
-export function FileUpload({ title, description, onFilesChange, files, accept = ".json" }: FileUploadProps) {
+// Parse a CSV with two columns (key, source_text). Handles quoted fields with commas/newlines/escaped quotes.
+function parseCsvToObject(text: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  const rows: string[][] = [];
+  let cur = '';
+  let row: string[] = [];
+  let inQuotes = false;
+
+  // Strip BOM
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { cur += '"'; i++; }
+        else { inQuotes = false; }
+      } else {
+        cur += c;
+      }
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(cur); cur = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i + 1] === '\n') i++;
+        row.push(cur); cur = '';
+        if (row.some(f => f.length > 0)) rows.push(row);
+        row = [];
+      } else {
+        cur += c;
+      }
+    }
+  }
+  if (cur.length > 0 || row.length > 0) {
+    row.push(cur);
+    if (row.some(f => f.length > 0)) rows.push(row);
+  }
+
+  if (rows.length === 0) return result;
+
+  // Detect header row: if first row looks like "key,something"
+  let startIdx = 0;
+  const first = rows[0].map(f => f.trim().toLowerCase());
+  if (first[0] === 'key' || first[0] === 'id' || first[1]?.includes('source') || first[1]?.includes('text') || first[1]?.includes('value')) {
+    startIdx = 1;
+  }
+
+  for (let i = startIdx; i < rows.length; i++) {
+    const r = rows[i];
+    if (r.length < 2) continue;
+    const key = r[0];
+    const value = r[1];
+    if (key && typeof value === 'string') {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+export function FileUpload({ title, description, onFilesChange, files, accept = ".json,.csv" }: FileUploadProps) {
   const [isDragOver, setIsDragOver] = useState(false);
 
   const handleFiles = useCallback(async (fileList: FileList | null) => {
@@ -22,10 +81,24 @@ export function FileUpload({ title, description, onFilesChange, files, accept = 
     
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
-      if (file.type === 'application/json' || file.name.endsWith('.json')) {
+      const isJson = file.type === 'application/json' || file.name.toLowerCase().endsWith('.json');
+      const isCsv = file.type === 'text/csv' || file.name.toLowerCase().endsWith('.csv');
+      if (isJson) {
         try {
           const text = await file.text();
           const content = JSON.parse(text);
+          newFiles.push({
+            name: file.name,
+            content,
+            path: (file as any).webkitRelativePath || file.name,
+          });
+        } catch (error) {
+          console.error(`Error parsing ${file.name}:`, error);
+        }
+      } else if (isCsv) {
+        try {
+          const text = await file.text();
+          const content = parseCsvToObject(text);
           newFiles.push({
             name: file.name,
             content,
