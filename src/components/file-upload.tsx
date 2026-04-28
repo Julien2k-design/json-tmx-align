@@ -155,7 +155,7 @@ export function FileUpload({ title, description, onFilesChange, files, accept = 
       >
         <Upload className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
         <p className="text-sm text-muted-foreground mb-4">
-          Drag and drop JSON files here, or click to browse
+          Drag and drop JSON or CSV files here, or click to browse
         </p>
         <input
           type="file"
