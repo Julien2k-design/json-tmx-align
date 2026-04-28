@@ -236,7 +236,7 @@ export function getBaseName(pathOrName: string): string {
   const filtered = parts.filter((seg) => !isLangSeg(seg));
   const last = (filtered.length ? filtered : parts).slice(-1)[0] || '';
   // Remove extension
-  let base = last.replace(/\.(json|js)$/i, '');
+  let base = last.replace(/\.(json|js|csv)$/i, '');
   // Remove leading or trailing language codes in the filename
   base = base.replace(/^([a-z]{2})(?:[-_][A-Za-z]{2})?[._-]+/i, '');
   base = base.replace(/[._-]+([a-z]{2})(?:[-_][A-Za-z]{2})?$/i, '');
