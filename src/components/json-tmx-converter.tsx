@@ -250,7 +250,7 @@ export function JsonTmxConverter() {
       <Card className="p-6 bg-gradient-card shadow-card">
         <h2 className="text-xl font-semibold mb-4 text-foreground">1. Upload Source Files</h2>
         <p className="text-muted-foreground mb-4">
-          Drop your source language JSON files here. These will be used as the reference for translation.
+          Drop your source language JSON or CSV files here (CSV must have two columns: key, source_text). These will be used as the reference for translation.
         </p>
         <FileUpload
           title="Source JSON Files"

@@ -173,7 +173,7 @@ export function detectLanguageForFile(file: JsonFile): { lang: string | null; or
 
 export function detectLanguageFromFilename(filename: string): string | null {
   // Try suffix near the extension: base_en-GB.json | base.en_US.json | base-fr.json
-  const suffixRe = /[._-]([a-z]{2})(?:[-_]?([a-z]{2}))?\.(json|js)$/i;
+  const suffixRe = /[._-]([a-z]{2})(?:[-_]?([a-z]{2}))?\.(json|js|csv)$/i;
   let m = filename.match(suffixRe);
   if (!m) {
     // Try prefix at the start: en-GB_home.json | fr.home.json | es-home.json
@@ -236,7 +236,7 @@ export function getBaseName(pathOrName: string): string {
   const filtered = parts.filter((seg) => !isLangSeg(seg));
   const last = (filtered.length ? filtered : parts).slice(-1)[0] || '';
   // Remove extension
-  let base = last.replace(/\.(json|js)$/i, '');
+  let base = last.replace(/\.(json|js|csv)$/i, '');
   // Remove leading or trailing language codes in the filename
   base = base.replace(/^([a-z]{2})(?:[-_][A-Za-z]{2})?[._-]+/i, '');
   base = base.replace(/[._-]+([a-z]{2})(?:[-_][A-Za-z]{2})?$/i, '');
